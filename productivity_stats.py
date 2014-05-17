@@ -9,6 +9,7 @@ import requests
 import requests_cache
 import subprocess
 import sys
+import os
 
 # CAREFUL: This caches everything, including omaha proxy lookups!
 requests_cache.install_cache('productivity_stats')
@@ -40,10 +41,10 @@ log = setup_logging()
 # Keep per-branch files in a directory.
 
 
+CACHE_LOCATION = 'productivity_stats_cache'
+
 # Default date format when stringifying python dates.
 PYTHON_DATE_FORMAT = "%Y-%m-%d %H:%M:%S.%f"
-# may require gclient sync --with_branch_heads && git fetch
-BRANCH_HEADS_PATH = 'refs/remotes/branch-heads'
 
 CSV_FIELD_ORDER = [
     'repository',
@@ -59,7 +60,6 @@ CSV_FIELD_ORDER = [
 
 # These are specific to Chrome and would need to be updated for Blink, etc.
 RIETVELD_URL = "https://codereview.chromium.org"
-SVN_URL = "svn://svn.chromium.org/chrome/trunk/src"
 RELEASE_HISTORY_CSV_URL = 'http://omahaproxy.appspot.com/history'
 
 # Authors which are expected to not have a review url.
@@ -69,25 +69,35 @@ IGNORED_AUTHORS = [
     'chromeos-lkgm@google.com',
 ]
 
-# FIXME: This is a hack.
-CHECKOUT_PATHS = {
-    'chrome': '/src/chromium/src',
-    'blink': '/src/chromium/src/third_party/WebKit',
-}
+REPOSITORIES = [
+    {
+        'name': 'chrome',
+        'relative_path': '.',
+        'svn_url': 'svn://svn.chromium.org/chrome/trunk/src',
+        'branch_heads': 'refs/remotes/branch-heads'
+    },
+    {
+        'name': 'blink',
+        'relative_path': 'third_party/WebKit',
+        'svn_url': 'svn://svn.chromium.org/blink/trunk',
+        'branch_heads': 'refs/remotes/branch-heads/chromium'
+    }
+]
 
 # For matching git commit messages:
+# FIXME: This may need to be repository-relative for Skia, etc.
 REVIEW_REGEXP = re.compile(r"Review URL: %s/(?P<review_id>\d+)" % RIETVELD_URL)
-SVN_REVISION_REGEXP = re.compile(r"git-svn-id: %s@(?P<svn_revision>\d+) \w+" % SVN_URL)
 
 
-def fetch_recent_branches():
+def fetch_recent_branches(repository):
     args = [
         'git', 'for-each-ref',
         '--sort=-committerdate',
         '--format=%(refname)',
-        BRANCH_HEADS_PATH
+        repository['branch_heads']
     ]
-    branch_paths = subprocess.check_output(args).strip('\n').split('\n')
+    for_each_ref_text = subprocess.check_output(args, cwd=repository['relative_path'])
+    branch_paths = for_each_ref_text.strip('\n').split('\n')
     branch_names = map(lambda name: name.split('/')[-1], branch_paths)
     # Only bother looking at base branches (ignore 1234_1, etc.)
     branch_names = filter(lambda name: re.match('^\d+$', name), branch_names)
@@ -97,8 +107,8 @@ def fetch_recent_branches():
     return sorted(branch_names, key=int, reverse=True)
 
 
-def path_for_branch(name):
-    return "%s/%s" % (BRANCH_HEADS_PATH, name)
+def path_for_branch(repository, name):
+    return "%s/%s" % (repository['branch_heads'], name)
 
 
 def parse_datetime(date_string):
@@ -128,9 +138,10 @@ def review_id_from_lines(lines):
             return int(match.group("review_id"))
 
 
-def svn_revision_from_lines(lines):
+def svn_revision_from_lines(lines, repository):
+    revision_regexp = re.compile(r"git-svn-id: %s@(?P<svn_revision>\d+) \w+" % repository['svn_url'])
     for line in lines:
-        match = SVN_REVISION_REGEXP.match(line)
+        match = revision_regexp.match(line)
         if match:
             return int(match.group('svn_revision'))
 
@@ -144,15 +155,15 @@ def creation_date_for_review(review_id):
         log.error("Error parsing: %s" % review_url)
 
 
-def change_times(branch_names, branch_release_times, commit_id, branch):
+def change_times(branch_names, branch_release_times, commit_id, branch, repository):
     change = {
-        'repository': 'chrome',
+        'repository': repository['name'],
         'commit_id': commit_id,
         'branch': branch,
     }
 
     args = ['git', 'log', '-1', '--pretty=format:%ct%n%cn%n%b', commit_id]
-    log_text = subprocess.check_output(args)
+    log_text = subprocess.check_output(args, cwd=repository['relative_path'])
 
     lines = log_text.split("\n")
     change['commit_date'] = datetime.datetime.fromtimestamp(int(lines.pop(0)))
@@ -168,7 +179,7 @@ def change_times(branch_names, branch_release_times, commit_id, branch):
     if not change['review_create_date']:
         log.debug("Skipping %s, failed to fetch/parse review JSON." % commit_id)
         return None
-    change['svn_revision'] = svn_revision_from_lines(lines)
+    change['svn_revision'] = svn_revision_from_lines(lines, repository)
 
     change['branch_release_date'] = branch_release_times.get(branch)
     # Branches are pre-filtered to include only released branches.
@@ -183,51 +194,82 @@ def csv_line(change, fields):
     return ",".join(map(lambda field: str(change[field]), fields))
 
 
-def merge_base(commit_one, commit_two=None):
+def merge_base(repository_path, commit_one, commit_two=None):
     if commit_two is None:
         commit_two = 'origin/master'
     args = ['git', 'merge-base', commit_one, commit_two]
-    return subprocess.check_output(args).strip('\n')
+    return subprocess.check_output(args, cwd=repository_path).strip('\n')
 
 
-def commits_new_in_branch(branch, previous_branch):
-    base_new = merge_base(path_for_branch(branch))
-    base_old = merge_base(path_for_branch(previous_branch))
+def commits_new_in_branch(branch, previous_branch, repository):
+    repository_path = repository['relative_path']
+    base_new = merge_base(repository_path, path_for_branch(repository, branch))
+    base_old = merge_base(repository_path, path_for_branch(repository, previous_branch))
     args = [
         'git', 'rev-list',
         '--abbrev-commit', '%s..%s' % (base_old, base_new)
     ]
-    return subprocess.check_output(args).strip('\n').split('\n')
+    rev_list_output = subprocess.check_output(args, cwd=repository_path)
+    stripped_output = rev_list_output.strip('\n')
+    # "".split("\n") returns [''] which will confuse callers.
+    if not stripped_output:
+        return []
+    return stripped_output.split('\n')
 
 
-def check_for_stale_checkout(branch_names, branch_release_times):
+def check_for_stale_checkout(repository, branch_names, branch_release_times):
+    repository_path = repository['relative_path']
     released_branches = branch_release_times.keys()
     latest_released_branch = sorted(released_branches, key=int, reverse=True)[0]
     latest_local_branch = branch_names[0]
     if int(latest_local_branch) < int(latest_released_branch):
-        log.warn("latest local branch %s is older than latest released branch %s, run git fetch.", latest_local_branch, latest_released_branch)
+        log.fatal("latest local branch %s is older than latest released branch %s in %s; run git fetch to update." %
+            (latest_local_branch, latest_released_branch, repository_path))
+        subprocess.check_call(['git', 'fetch'], cwd=repository_path)
+
+
+def csv_path(branch, repository):
+    return os.path.join(CACHE_LOCATION, "%s_%s.csv" % (branch, repository))
+
+
+def validate_checkouts_and_fetch_branch_names(branch_release_times):
+    branch_names = None
+    for repository in REPOSITORIES:
+        recent_branches = fetch_recent_branches(repository)
+        # Filter out any non-released branches (failed to build, etc.)
+        filtered_branches = filter(lambda name: name in branch_release_times, recent_branches)
+
+        check_for_stale_checkout(repository, recent_branches, branch_release_times)
+
+        # Save the Chrome branches for use by the rest of the function.
+        if repository['name'] == 'chrome':
+            branch_names = recent_branches
+    return branch_names
 
 
 def fetch_command(args):
     branch_release_times = fetch_branch_release_times()
-    branch_names = fetch_recent_branches()
-    # Filter out any non-released branches (failed to build, etc.)
-    branch_names = filter(lambda name: name in branch_release_times, branch_names)
+    branch_names = validate_checkouts_and_fetch_branch_names(branch_release_times)
 
-    check_for_stale_checkout(branch_names, branch_release_times)
     branch_limit = min(len(branch_names) - 1, args.branch_limit)
 
-    print ",".join(CSV_FIELD_ORDER)
+    if not os.path.exists(CACHE_LOCATION):
+        os.makedirs(CACHE_LOCATION)
+
     for index in range(branch_limit):
         branch, previous_branch = branch_names[index], branch_names[index + 1]
-        commits = commits_new_in_branch(branch, previous_branch)
-        log.info("%s commits between branch %s and %s" %
-            (len(commits), branch, previous_branch))
-        for commit_id in commits:
-            change = change_times(branch_names, branch_release_times, commit_id, branch)
-            if change:
-                print csv_line(change, CSV_FIELD_ORDER)
-        log.debug("Completed %s of %s branches" % (index + 1, branch_limit))
+        for repository in REPOSITORIES:
+            csv_file = sys.stdout
+            csv_file.write(",".join(CSV_FIELD_ORDER) + "\n")
+            commits = commits_new_in_branch(branch, previous_branch, repository)
+            log.info("%s commits between branch %s and %s in %s" %
+                (len(commits), branch, previous_branch, repository['name']))
+            for commit_id in commits:
+                change = change_times(branch_names, branch_release_times,
+                    commit_id, branch, repository)
+                if change:
+                    csv_file.write(csv_line(change, CSV_FIELD_ORDER) + "\n")
+            log.debug("Completed %s of %s branches" % (index + 1, branch_limit))
 
 
 def split_csv_line(csv_line):
