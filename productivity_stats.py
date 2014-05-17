@@ -88,7 +88,9 @@ def parse_datetime(date_string):
 
 def fetch_branch_release_times():
     release_times = {}
-    history_text = requests.get("http://omahaproxy.appspot.com/history").text
+    # Always grab the most recent release history.
+    with requests_cache.disabled():
+        history_text = requests.get("http://omahaproxy.appspot.com/history").text
     for line in history_text.strip('\n').split('\n'):
         os, channel, version, date_string = line.split(',')
         date = parse_datetime(date_string)
@@ -115,7 +117,10 @@ def svn_revision_from_lines(lines):
 
 def creation_date_for_review(review_id):
     review_url = "https://codereview.chromium.org/api/%s" % review_id
-    return parse_datetime(requests.get(review_url).json()["created"])
+    try:
+        return parse_datetime(requests.get(review_url).json()["created"])
+    except ValueError:
+        log.error("Error parsing: %s" % review_url)
 
 
 def change_times(branch_names, branch_release_times, commit_id, branch):
@@ -134,6 +139,9 @@ def change_times(branch_names, branch_release_times, commit_id, branch):
         return None
 
     change['issue_created_date'] = creation_date_for_review(change['review_id'])
+    if not change['issue_created_date']:
+        log.debug("Skipping %s, failed to fetch/parse review JSON." % change['commit_id'])
+        return None
     change['svn_revision'] = svn_revision_from_lines(lines)
 
     change['branch'] = branch
@@ -187,7 +195,10 @@ def fetch_command(args):
     branch_release_times = fetch_branch_release_times()
     branch_names = fetch_recent_branches(BRANCH_LIMIT, branch_release_times)
     check_for_stale_checkout(branch_names, branch_release_times)
+    line_target = 10000
 
+    change_count = 0
+    skipped = 0
     print ",".join(CSV_FIELD_ORDER)
     for branch, previous_branch in window(reversed(branch_names)):
         commits = commits_new_in_branch(branch, previous_branch)
@@ -196,7 +207,14 @@ def fetch_command(args):
             change = change_times(branch_names, branch_release_times, commit_id, branch)
             if change:
                 print csv_line(change, CSV_FIELD_ORDER)
-
+                change_count += 1
+            else:
+                skipped += 1
+        log.debug("%s of %s" % (change_count, line_target))
+        if change_count >= line_target:
+            break
+    total = change_count + skipped
+    log.info("Skipped %s out of %s (%d%%)" % (skipped, total, (float(skipped) / total) * 100))
 
 def process_command(args):
     csv_file = open(args.csv_file)
