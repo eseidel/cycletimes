@@ -33,12 +33,11 @@ log = setup_logging()
 # TODO:
 # Verify that timezones are correct for all timestamps!
 # (Timezones can mean hours, which is a lot of time!)
-# Spit out real CSV (for later processing)
 # Record first LGTM time
 # Record first CQ time.
 # Blink Rolls
 # Reverts
-# Re-write to walk down releases instead of commits.
+# Filter out DEPS updates from chrome-admin@google.com
 
 # Default date format when stringifying python dates.
 PYTHON_DATE_FORMAT = "%Y-%m-%d %H:%M:%S.%f"
@@ -47,7 +46,14 @@ BRANCH_LIMIT = 100
 # may require gclient sync --with_branch_heads && git fetch
 BRANCH_HEADS_PATH = 'refs/remotes/branch-heads'
 
-CSV_FIELD_ORDER = ['commit_id', 'svn_revision', 'review_id', 'branch', 'issue_created_date', 'commit_date', 'branch_release_date']
+CSV_FIELD_ORDER = ['commit_id', 'svn_revision', 'commit_author', 'review_id', 'branch', 'review_create_date', 'commit_date', 'branch_release_date']
+
+# Authors which are expected to not have a review url.
+IGNORED_AUTHORS = [
+    'chrome-admin@google.com',
+    'chrome-release@google.com',
+    'chromeos-lkgm@google.com',
+]
 
 # For matching git commit messages:
 REVIEW_REGEXP = re.compile(r"Review URL: https://codereview\.chromium\.org/(?P<review_id>\d+)")
@@ -127,19 +133,21 @@ def change_times(branch_names, branch_release_times, commit_id, branch):
     global last_branch
     change = {}
 
-    args = ['git', 'log', '-1', '--pretty=format:%ct%n%b', commit_id]
+    args = ['git', 'log', '-1', '--pretty=format:%ct%n%cn%n%b', commit_id]
     log_text = subprocess.check_output(args)
 
     lines = log_text.split("\n")
     change['commit_id'] = commit_id
     change['commit_date'] = datetime.datetime.fromtimestamp(int(lines.pop(0)))
+    change['commit_author'] = lines.pop(0)
     change['review_id'] = review_id_from_lines(lines)
     if not change['review_id']:
-        log.debug("Skipping %s, no Review URL" % change['commit_id'])
+        if change['commit_author'] not in IGNORED_AUTHORS:
+            log.debug("Skipping %s from %s no Review URL" % (change['commit_id'], change['commit_author']))
         return None
 
-    change['issue_created_date'] = creation_date_for_review(change['review_id'])
-    if not change['issue_created_date']:
+    change['review_create_date'] = creation_date_for_review(change['review_id'])
+    if not change['review_create_date']:
         log.debug("Skipping %s, failed to fetch/parse review JSON." % change['commit_id'])
         return None
     change['svn_revision'] = svn_revision_from_lines(lines)
@@ -195,10 +203,11 @@ def fetch_command(args):
     branch_release_times = fetch_branch_release_times()
     branch_names = fetch_recent_branches(BRANCH_LIMIT, branch_release_times)
     check_for_stale_checkout(branch_names, branch_release_times)
-    line_target = 10000
+    branch_target = 3
 
     change_count = 0
     skipped = 0
+    branch_count = 0
     print ",".join(CSV_FIELD_ORDER)
     for branch, previous_branch in window(reversed(branch_names)):
         commits = commits_new_in_branch(branch, previous_branch)
@@ -210,8 +219,9 @@ def fetch_command(args):
                 change_count += 1
             else:
                 skipped += 1
-        log.debug("%s of %s" % (change_count, line_target))
-        if change_count >= line_target:
+        branch_count += 1
+        log.debug("%s of %s" % (branch_count, branch_target))
+        if branch_count >= branch_target:
             break
     total = change_count + skipped
     log.info("Skipped %s out of %s (%d%%)" % (skipped, total, (float(skipped) / total) * 100))
@@ -224,7 +234,7 @@ def process_command(args):
         return 1
 
     changes = [dict(zip(CSV_FIELD_ORDER, line.strip('\n').split(','))) for line in csv_file]
-    times = map(lambda change: (parse_datetime(change['branch_release_date']) - parse_datetime(change['issue_created_date'])).total_seconds(), changes)
+    times = map(lambda change: (parse_datetime(change['branch_release_date']) - parse_datetime(change['review_create_date'])).total_seconds(), changes)
     print "Records: ", len(times)
     print "Mean:", datetime.timedelta(seconds=numpy.mean(times))
     print "Precentiles:"
