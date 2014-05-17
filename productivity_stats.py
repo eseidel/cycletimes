@@ -1,13 +1,33 @@
 #!/usr/bin/env python
 
-import subprocess
-import requests
-from datetime import datetime, timedelta
+import argparse
+import datetime
+import numpy
 import re
-
+import requests
 import requests_cache
+import subprocess
+import sys
+
 # CAREFUL: This caches everything, including omaha proxy lookups!
 requests_cache.install_cache('productivity_stats')
+
+
+import logging
+
+# Python logging is stupidly verbose to configure.
+def setup_logging():
+    logger = logging.getLogger(__name__)
+    logger.setLevel(logging.DEBUG)
+    ch = logging.StreamHandler()
+    ch.setLevel(logging.DEBUG)
+    formatter = logging.Formatter('%(levelname)s: %(message)s')
+    ch.setFormatter(formatter)
+    logger.addHandler(ch)
+    return logger
+
+
+log = setup_logging()
 
 # TODO:
 # Verify that timezones are correct for all timestamps!
@@ -15,23 +35,9 @@ requests_cache.install_cache('productivity_stats')
 # Spit out real CSV (for later processing)
 # Record first LGTM time
 # Record first CQ time.
-#
-
-# def commit_date(commitish):
-#   args = ['git', 'log', '-1', "--pretty=format:%ct", commitish]
-#   return datetime.fromtimestamp(int(subprocess.check_output(args)))
-
-# class Branch(object):
-#   def __init__(self, branch_path):
-#       self.path = branch_path
-#       self.date = commit_date(branch_path)
-
-
-# args = ['git', 'show-ref']
-# branch_text = subprocess.check_output(args)
-# all_ref_paths = [line.split(' ')[1] for line in branch_text.split("\n") if line]
-# all_branch_paths = filter(lambda name: name.startswith("refs/remotes/branch-heads"), all_ref_paths)
-# all_branches = map(Branch, all_branch_paths)
+# Blink Rolls
+# Reverts
+# Re-write to walk down releases instead of commits.
 
 # Default date format when stringifying python dates.
 PYTHON_DATE_FORMAT = "%Y-%m-%d %H:%M:%S.%f"
@@ -39,6 +45,8 @@ PYTHON_DATE_FORMAT = "%Y-%m-%d %H:%M:%S.%f"
 BRANCH_LIMIT = 50
 # may require gclient sync --with_branch_heads && git fetch
 BRANCH_HEADS_PATH = 'refs/remotes/branch-heads'
+
+CSV_FIELD_ORDER = ['commit_id', 'svn_revision', 'review_id', 'branch', 'issue_created_date', 'commit_date', 'branch_release_date']
 
 # For matching git commit messages:
 REVIEW_REGEXP = re.compile(r"Review URL: https://codereview\.chromium\.org/(?P<review_id>\d+)")
@@ -72,22 +80,24 @@ def path_for_branch(name):
     return "%s/%s" % (BRANCH_HEADS_PATH, name)
 
 
+def parse_datetime(date_string):
+    return datetime.datetime.strptime(date_string, PYTHON_DATE_FORMAT)
+
+
 def fetch_branch_release_times():
     release_times = {}
     history_text = requests.get("http://omahaproxy.appspot.com/history").text
     for line in history_text.strip('\n').split('\n'):
         os, channel, version, date_string = line.split(',')
-        date = datetime.strptime(date_string, PYTHON_DATE_FORMAT)
+        date = parse_datetime(date_string)
         branch = version.split('.')[2]
         last_date = release_times.get(branch)
         if not last_date or last_date > date:
             release_times[branch] = date
     return release_times
 
-branch_release_times = fetch_branch_release_times()
-branch_names = fetch_recent_branches(BRANCH_LIMIT, branch_release_times)
 
-
+# FIXME: We spend *all* of our time inside this call to git.
 def contains_commit(branch_id, commit_id):
     # These are supposed to work but didn't:
     #git log <ref>..<sha1>'
@@ -95,8 +105,8 @@ def contains_commit(branch_id, commit_id):
     args = ['git', 'merge-base', '--is-ancestor', commit_id, branch_id]
     return subprocess.call(args) == 0
 
-
-def oldest_released_branch(commit_id, expected_branch=None):
+# FIXME: This should be a binary search, presumably using the bisect module.
+def oldest_released_branch(branch_names, commit_id, expected_branch=None):
     # Fast-path for repeated lookups of the same branch (like when walking back through git history)
     if expected_branch and contains_commit(path_for_branch(expected_branch), commit_id):
         expected_index = branch_names.index(expected_branch)
@@ -128,50 +138,96 @@ def svn_revision_from_lines(lines):
 
 def creation_date_for_review(review_id):
     review_url = "https://codereview.chromium.org/api/%s" % review_id
-    issue_created_text = requests.get(review_url).json()["created"]
-    return datetime.strptime(issue_created_text, PYTHON_DATE_FORMAT)
+    return parse_datetime(requests.get(review_url).json()["created"])
 
 
-# FIXME: This should be a generator which returns objects.
-commit_id = "b9e6bdf4ae49e553d08bbea5efb3a355a8484987"
-commit_separator = "==============================="
-args = [
-    'git', 'log',
-    '-n', "1000",
-    '--pretty=format:%h%n%ct%n%b%n' + commit_separator,
-    commit_id
-]
-log_text = subprocess.check_output(args)
-
-times = []
 last_branch = None
-for message in log_text.split(commit_separator + "\n"):
-    # The last message is often empty.
-    if not message:
-        break
-    lines = message.split("\n")
-    commit_id = lines.pop(0)
-    commit_date = datetime.fromtimestamp(int(lines.pop(0)))
-    review_id = review_id_from_lines(lines)
-    if not review_id:
-        print "Skipping %s, no Review URL" % commit_id
-        continue
 
-    issue_created = creation_date_for_review(review_id)
-    svn_revision = svn_revision_from_lines(lines)
-    branch = oldest_released_branch(commit_id, last_branch)
-    if branch:
-        last_branch = branch
-    branch_release_date = branch_release_times.get(branch)
-    if not branch_release_date:
-        print "ERROR: No release date for %s???" % branch
-        continue
 
-    delta_to_review = commit_date - issue_created
-    delta_to_release = branch_release_date
-    total_delta = branch_release_date - issue_created
-    print commit_id, "r%s" % svn_revision, review_id, branch, "%24s" % total_delta
-    times.append(total_delta.total_seconds())
+def change_times(branch_names, branch_release_times, commit_id):
+    global last_branch
+    change = {}
 
-avg_seconds = sum(times) / len(times)
-print "Average:", timedelta(seconds=avg_seconds)
+    args = ['git', 'log', '-1', '--pretty=format:%ct%n%b', commit_id]
+    log_text = subprocess.check_output(args)
+
+    lines = log_text.split("\n")
+    change['commit_id'] = commit_id
+    change['commit_date'] = datetime.datetime.fromtimestamp(int(lines.pop(0)))
+    change['review_id'] = review_id_from_lines(lines)
+    if not change['review_id']:
+        log.warning("Skipping %s, no Review URL" % change['commit_id'])
+        return None
+
+    change['issue_created_date'] = creation_date_for_review(change['review_id'])
+    change['svn_revision'] = svn_revision_from_lines(lines)
+
+    # FIXME: last_branch is kinda a hack.
+    change['branch'] = oldest_released_branch(branch_names, change['commit_id'], last_branch)
+    if change['branch']:
+        last_branch = change['branch']
+    change['branch_release_date'] = branch_release_times.get(change['branch'])
+    # Branches are pre-filtered to include only released branches.
+    if not change['branch_release_date']:
+        log.error("No release date for %s???" % change['branch'])
+        return None
+
+    return change
+
+
+def git_log(commitish, count):
+    args = [
+        'git', 'log',
+        '-n', str(count),
+        '--pretty=format:%h',
+        commitish
+    ]
+    return subprocess.check_output(args).split('\n')
+
+
+def csv_line(change, fields):
+    return ",".join(map(lambda field: str(change[field]), fields))
+
+
+def fetch_command(args):
+    branch_release_times = fetch_branch_release_times()
+    branch_names = fetch_recent_branches(BRANCH_LIMIT, branch_release_times)
+
+    start_commitish = "b9e6bdf4ae49e553d08bbea5efb3a355a8484987"
+    search_limit = 1000
+
+    print ",".join(CSV_FIELD_ORDER)
+    for commit_id in git_log(start_commitish, search_limit):
+        change = change_times(branch_names, branch_release_times, commit_id)
+        if change:
+            print csv_line(change, CSV_FIELD_ORDER)
+
+def process_command(args):
+    csv_file = open(args.csv_file)
+    fields = csv_file.readline().strip('\n').split(',')
+    if fields != CSV_FIELD_ORDER:
+        log.error("CSV Field mismatch, got: %s, expected: %s" % (fields, CSV_FIELD_ORDER))
+        return 1
+
+    changes = [dict(zip(CSV_FIELD_ORDER, line.strip('\n').split(','))) for line in csv_file]
+    times = map(lambda change: (parse_datetime(change['branch_release_date']) - parse_datetime(change['issue_created_date'])).total_seconds(), changes)
+    print "Records: ", len(times)
+    print "Mean:", datetime.timedelta(seconds=numpy.mean(times))
+    print "Precentiles:"
+    for percentile in (1, 10, 25, 50, 75, 90, 99):
+        print "%s%%: %s" % (percentile, datetime.timedelta(seconds=numpy.percentile(times, percentile)))
+
+
+def main(args):
+    parser = argparse.ArgumentParser()
+    subparsers = parser.add_subparsers()
+    fetch_parser = subparsers.add_parser('fetch')
+    fetch_parser.set_defaults(func=fetch_command)
+    process_parser = subparsers.add_parser('process')
+    process_parser.add_argument('csv_file')
+    process_parser.set_defaults(func=process_command)
+    args = parser.parse_args(args)
+    return args.func(args)
+
+if __name__ == "__main__":
+    main(sys.argv[1:])
