@@ -2,6 +2,7 @@
 
 import argparse
 import datetime
+import itertools
 import numpy
 import re
 import requests
@@ -42,7 +43,7 @@ log = setup_logging()
 # Default date format when stringifying python dates.
 PYTHON_DATE_FORMAT = "%Y-%m-%d %H:%M:%S.%f"
 # Currently only bothering looking at the 50 most recent branches.
-BRANCH_LIMIT = 50
+BRANCH_LIMIT = 100
 # may require gclient sync --with_branch_heads && git fetch
 BRANCH_HEADS_PATH = 'refs/remotes/branch-heads'
 
@@ -73,6 +74,7 @@ def fetch_recent_branches(limit=None, branch_release_times=None):
     # Filter out any non-released branches.
     if branch_release_times:
         branch_names = filter(lambda name: name in branch_release_times, branch_names)
+
     return sorted(branch_names, key=int)
 
 
@@ -97,31 +99,6 @@ def fetch_branch_release_times():
     return release_times
 
 
-# FIXME: We spend *all* of our time inside this call to git.
-def contains_commit(branch_id, commit_id):
-    # These are supposed to work but didn't:
-    #git log <ref>..<sha1>'
-    #args = ['git', 'rev-list', '-n', '1', "%s...%s" % (branch_id, commit_id)]
-    args = ['git', 'merge-base', '--is-ancestor', commit_id, branch_id]
-    return subprocess.call(args) == 0
-
-# FIXME: This should be a binary search, presumably using the bisect module.
-def oldest_released_branch(branch_names, commit_id, expected_branch=None):
-    # Fast-path for repeated lookups of the same branch (like when walking back through git history)
-    if expected_branch and contains_commit(path_for_branch(expected_branch), commit_id):
-        expected_index = branch_names.index(expected_branch)
-        if expected_index == 0:
-            return expected_branch
-        before_expected_branch = branch_names[expected_index - 1]
-        if not contains_commit(path_for_branch(before_expected_branch), commit_id):
-            return expected_branch
-
-    for branch in branch_names:
-        if contains_commit(path_for_branch(branch), commit_id):
-            return branch
-    return None
-
-
 def review_id_from_lines(lines):
     for line in lines:
         match = REVIEW_REGEXP.match(line)
@@ -141,10 +118,7 @@ def creation_date_for_review(review_id):
     return parse_datetime(requests.get(review_url).json()["created"])
 
 
-last_branch = None
-
-
-def change_times(branch_names, branch_release_times, commit_id):
+def change_times(branch_names, branch_release_times, commit_id, branch):
     global last_branch
     change = {}
 
@@ -156,16 +130,13 @@ def change_times(branch_names, branch_release_times, commit_id):
     change['commit_date'] = datetime.datetime.fromtimestamp(int(lines.pop(0)))
     change['review_id'] = review_id_from_lines(lines)
     if not change['review_id']:
-        log.warning("Skipping %s, no Review URL" % change['commit_id'])
+        log.debug("Skipping %s, no Review URL" % change['commit_id'])
         return None
 
     change['issue_created_date'] = creation_date_for_review(change['review_id'])
     change['svn_revision'] = svn_revision_from_lines(lines)
 
-    # FIXME: last_branch is kinda a hack.
-    change['branch'] = oldest_released_branch(branch_names, change['commit_id'], last_branch)
-    if change['branch']:
-        last_branch = change['branch']
+    change['branch'] = branch
     change['branch_release_date'] = branch_release_times.get(change['branch'])
     # Branches are pre-filtered to include only released branches.
     if not change['branch_release_date']:
@@ -175,32 +146,57 @@ def change_times(branch_names, branch_release_times, commit_id):
     return change
 
 
-def git_log(commitish, count):
-    args = [
-        'git', 'log',
-        '-n', str(count),
-        '--pretty=format:%h',
-        commitish
-    ]
-    return subprocess.check_output(args).split('\n')
-
-
 def csv_line(change, fields):
     return ",".join(map(lambda field: str(change[field]), fields))
+
+
+def merge_base(commit_one, commit_two=None):
+    if commit_two is None:
+        commit_two = 'origin/master'
+    args = ['git', 'merge-base', commit_one, commit_two]
+    return subprocess.check_output(args).strip('\n')
+
+
+def commits_new_in_branch(branch, previous_branch):
+    base_new = merge_base(path_for_branch(branch))
+    base_old = merge_base(path_for_branch(previous_branch))
+    args = ['git', 'rev-list', '--abbrev-commit', '%s..%s' % (base_old, base_new)]
+    return subprocess.check_output(args).strip('\n').split('\n')
+
+
+# http://stackoverflow.com/questions/6822725/rolling-or-sliding-window-iterator-in-python
+def window(seq, n=2):
+    "Returns a sliding window (of width n) over data from the iterable"
+    "   s -> (s0,s1,...s[n-1]), (s1,s2,...,sn), ...                   "
+    it = iter(seq)
+    result = tuple(itertools.islice(it, n))
+    if len(result) == n:
+        yield result
+    for elem in it:
+        result = result[1:] + (elem,)
+        yield result
+
+def check_for_stale_checkout(branch_names, branch_release_times):
+    latest_json_branch = int(sorted(branch_release_times.keys(), key=int, reverse=True)[0])
+    latest_local_branch = next(reversed(branch_names))
+    if latest_local_branch < latest_json_branch:
+        log.warn("latest local branch %s is older than latest released branch %s, run git fetch.", latest_local_branch, latest_json_branch)
 
 
 def fetch_command(args):
     branch_release_times = fetch_branch_release_times()
     branch_names = fetch_recent_branches(BRANCH_LIMIT, branch_release_times)
-
-    start_commitish = "b9e6bdf4ae49e553d08bbea5efb3a355a8484987"
-    search_limit = 1000
+    check_for_stale_checkout(branch_names, branch_release_times)
 
     print ",".join(CSV_FIELD_ORDER)
-    for commit_id in git_log(start_commitish, search_limit):
-        change = change_times(branch_names, branch_release_times, commit_id)
-        if change:
-            print csv_line(change, CSV_FIELD_ORDER)
+    for branch, previous_branch in window(reversed(branch_names)):
+        commits = commits_new_in_branch(branch, previous_branch)
+        log.info("%s commits between branch %s and %s" % (len(commits), branch, previous_branch))
+        for commit_id in commits:
+            change = change_times(branch_names, branch_release_times, commit_id, branch)
+            if change:
+                print csv_line(change, CSV_FIELD_ORDER)
+
 
 def process_command(args):
     csv_file = open(args.csv_file)
