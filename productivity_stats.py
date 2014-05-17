@@ -37,16 +37,30 @@ log = setup_logging()
 # Record first CQ time.
 # Blink Rolls
 # Reverts
-# Filter out DEPS updates from chrome-admin@google.com
+# Keep per-branch files in a directory.
+
 
 # Default date format when stringifying python dates.
 PYTHON_DATE_FORMAT = "%Y-%m-%d %H:%M:%S.%f"
-# Currently only bothering looking at the 50 most recent branches.
-BRANCH_LIMIT = 100
 # may require gclient sync --with_branch_heads && git fetch
 BRANCH_HEADS_PATH = 'refs/remotes/branch-heads'
 
-CSV_FIELD_ORDER = ['commit_id', 'svn_revision', 'commit_author', 'review_id', 'branch', 'review_create_date', 'commit_date', 'branch_release_date']
+CSV_FIELD_ORDER = [
+    'repository',
+    'commit_id',
+    'svn_revision',
+    'commit_author',
+    'review_id',
+    'branch',
+    'review_create_date',
+    'commit_date',
+    'branch_release_date',
+]
+
+# These are specific to Chrome and would need to be updated for Blink, etc.
+RIETVELD_URL = "https://codereview.chromium.org"
+SVN_URL = "svn://svn.chromium.org/chrome/trunk/src"
+RELEASE_HISTORY_CSV_URL = 'http://omahaproxy.appspot.com/history'
 
 # Authors which are expected to not have a review url.
 IGNORED_AUTHORS = [
@@ -55,20 +69,24 @@ IGNORED_AUTHORS = [
     'chromeos-lkgm@google.com',
 ]
 
+# FIXME: This is a hack.
+CHECKOUT_PATHS = {
+    'chrome': '/src/chromium/src',
+    'blink': '/src/chromium/src/third_party/WebKit',
+}
+
 # For matching git commit messages:
-REVIEW_REGEXP = re.compile(r"Review URL: https://codereview\.chromium\.org/(?P<review_id>\d+)")
-SVN_REVISION_REGEXP = re.compile(r"git-svn-id: svn://svn.chromium.org/chrome/trunk/src@(?P<svn_revision>\d+) \w+")
+REVIEW_REGEXP = re.compile(r"Review URL: %s/(?P<review_id>\d+)" % RIETVELD_URL)
+SVN_REVISION_REGEXP = re.compile(r"git-svn-id: %s@(?P<svn_revision>\d+) \w+" % SVN_URL)
 
 
-def fetch_recent_branches(limit=None, branch_release_times=None):
+def fetch_recent_branches():
     args = [
         'git', 'for-each-ref',
         '--sort=-committerdate',
         '--format=%(refname)',
         BRANCH_HEADS_PATH
     ]
-    if limit:
-        args.append('--count=%s' % limit)
     branch_paths = subprocess.check_output(args).strip('\n').split('\n')
     branch_names = map(lambda name: name.split('/')[-1], branch_paths)
     # Only bother looking at base branches (ignore 1234_1, etc.)
@@ -76,12 +94,7 @@ def fetch_recent_branches(limit=None, branch_release_times=None):
     # Even though the branches are sorted in commit time, we're still
     # going to sort them in integer order for our purposes.
     # Ordered from oldest to newest.
-
-    # Filter out any non-released branches.
-    if branch_release_times:
-        branch_names = filter(lambda name: name in branch_release_times, branch_names)
-
-    return sorted(branch_names, key=int)
+    return sorted(branch_names, key=int, reverse=True)
 
 
 def path_for_branch(name):
@@ -92,11 +105,12 @@ def parse_datetime(date_string):
     return datetime.datetime.strptime(date_string, PYTHON_DATE_FORMAT)
 
 
+# FIXME: This could share logic with other CSV reading functions.
 def fetch_branch_release_times():
     release_times = {}
     # Always grab the most recent release history.
     with requests_cache.disabled():
-        history_text = requests.get("http://omahaproxy.appspot.com/history").text
+        history_text = requests.get(RELEASE_HISTORY_CSV_URL).text
     for line in history_text.strip('\n').split('\n'):
         os, channel, version, date_string = line.split(',')
         date = parse_datetime(date_string)
@@ -122,41 +136,44 @@ def svn_revision_from_lines(lines):
 
 
 def creation_date_for_review(review_id):
-    review_url = "https://codereview.chromium.org/api/%s" % review_id
+    review_url = "%s/api/%s" % (RIETVELD_URL, review_id)
     try:
-        return parse_datetime(requests.get(review_url).json()["created"])
+        review_json = requests.get(review_url).json()
+        return parse_datetime(review_json["created"])
     except ValueError:
         log.error("Error parsing: %s" % review_url)
 
 
 def change_times(branch_names, branch_release_times, commit_id, branch):
-    global last_branch
-    change = {}
+    change = {
+        'repository': 'chrome',
+        'commit_id': commit_id,
+        'branch': branch,
+    }
 
     args = ['git', 'log', '-1', '--pretty=format:%ct%n%cn%n%b', commit_id]
     log_text = subprocess.check_output(args)
 
     lines = log_text.split("\n")
-    change['commit_id'] = commit_id
     change['commit_date'] = datetime.datetime.fromtimestamp(int(lines.pop(0)))
     change['commit_author'] = lines.pop(0)
     change['review_id'] = review_id_from_lines(lines)
     if not change['review_id']:
         if change['commit_author'] not in IGNORED_AUTHORS:
-            log.debug("Skipping %s from %s no Review URL" % (change['commit_id'], change['commit_author']))
+            log.debug("Skipping %s from %s no Review URL" %
+                (commit_id, change['commit_author']))
         return None
 
     change['review_create_date'] = creation_date_for_review(change['review_id'])
     if not change['review_create_date']:
-        log.debug("Skipping %s, failed to fetch/parse review JSON." % change['commit_id'])
+        log.debug("Skipping %s, failed to fetch/parse review JSON." % commit_id)
         return None
     change['svn_revision'] = svn_revision_from_lines(lines)
 
-    change['branch'] = branch
-    change['branch_release_date'] = branch_release_times.get(change['branch'])
+    change['branch_release_date'] = branch_release_times.get(branch)
     # Branches are pre-filtered to include only released branches.
     if not change['branch_release_date']:
-        log.error("No release date for %s???" % change['branch'])
+        log.error("No release date for %s???" % branch)
         return None
 
     return change
@@ -176,82 +193,88 @@ def merge_base(commit_one, commit_two=None):
 def commits_new_in_branch(branch, previous_branch):
     base_new = merge_base(path_for_branch(branch))
     base_old = merge_base(path_for_branch(previous_branch))
-    args = ['git', 'rev-list', '--abbrev-commit', '%s..%s' % (base_old, base_new)]
+    args = [
+        'git', 'rev-list',
+        '--abbrev-commit', '%s..%s' % (base_old, base_new)
+    ]
     return subprocess.check_output(args).strip('\n').split('\n')
 
 
-# http://stackoverflow.com/questions/6822725/rolling-or-sliding-window-iterator-in-python
-def window(seq, n=2):
-    "Returns a sliding window (of width n) over data from the iterable"
-    "   s -> (s0,s1,...s[n-1]), (s1,s2,...,sn), ...                   "
-    it = iter(seq)
-    result = tuple(itertools.islice(it, n))
-    if len(result) == n:
-        yield result
-    for elem in it:
-        result = result[1:] + (elem,)
-        yield result
-
 def check_for_stale_checkout(branch_names, branch_release_times):
-    latest_json_branch = int(sorted(branch_release_times.keys(), key=int, reverse=True)[0])
-    latest_local_branch = next(reversed(branch_names))
-    if latest_local_branch < latest_json_branch:
-        log.warn("latest local branch %s is older than latest released branch %s, run git fetch.", latest_local_branch, latest_json_branch)
+    released_branches = branch_release_times.keys()
+    latest_released_branch = sorted(released_branches, key=int, reverse=True)[0]
+    latest_local_branch = branch_names[0]
+    if int(latest_local_branch) < int(latest_released_branch):
+        log.warn("latest local branch %s is older than latest released branch %s, run git fetch.", latest_local_branch, latest_released_branch)
 
 
 def fetch_command(args):
     branch_release_times = fetch_branch_release_times()
-    branch_names = fetch_recent_branches(BRANCH_LIMIT, branch_release_times)
-    check_for_stale_checkout(branch_names, branch_release_times)
-    branch_target = 3
+    branch_names = fetch_recent_branches()
+    # Filter out any non-released branches (failed to build, etc.)
+    branch_names = filter(lambda name: name in branch_release_times, branch_names)
 
-    change_count = 0
-    skipped = 0
-    branch_count = 0
+    check_for_stale_checkout(branch_names, branch_release_times)
+    branch_limit = min(len(branch_names) - 1, args.branch_limit)
+
     print ",".join(CSV_FIELD_ORDER)
-    for branch, previous_branch in window(reversed(branch_names)):
+    for index in range(branch_limit):
+        branch, previous_branch = branch_names[index], branch_names[index + 1]
         commits = commits_new_in_branch(branch, previous_branch)
-        log.info("%s commits between branch %s and %s" % (len(commits), branch, previous_branch))
+        log.info("%s commits between branch %s and %s" %
+            (len(commits), branch, previous_branch))
         for commit_id in commits:
             change = change_times(branch_names, branch_release_times, commit_id, branch)
             if change:
                 print csv_line(change, CSV_FIELD_ORDER)
-                change_count += 1
-            else:
-                skipped += 1
-        branch_count += 1
-        log.debug("%s of %s" % (branch_count, branch_target))
-        if branch_count >= branch_target:
-            break
-    total = change_count + skipped
-    log.info("Skipped %s out of %s (%d%%)" % (skipped, total, (float(skipped) / total) * 100))
+        log.debug("Completed %s of %s branches" % (index + 1, branch_limit))
 
-def process_command(args):
-    csv_file = open(args.csv_file)
-    fields = csv_file.readline().strip('\n').split(',')
+
+def split_csv_line(csv_line):
+    return csv_line.strip('\n').split(',')
+
+
+def read_csv(file_path):
+    csv_file = open(file_path)
+    fields = split_csv_line(csv_file.readline())
     if fields != CSV_FIELD_ORDER:
-        log.error("CSV Field mismatch, got: %s, expected: %s" % (fields, CSV_FIELD_ORDER))
+        log.error("CSV Field mismatch, got: %s, expected: %s" %
+            (fields, CSV_FIELD_ORDER))
         return 1
 
-    changes = [dict(zip(CSV_FIELD_ORDER, line.strip('\n').split(','))) for line in csv_file]
-    times = map(lambda change: (parse_datetime(change['branch_release_date']) - parse_datetime(change['review_create_date'])).total_seconds(), changes)
+    return [dict(zip(CSV_FIELD_ORDER, split_csv_line(line))) for line in csv_file]
+
+
+def print_stats(changes):
+    def total_seconds(change):
+        return (parse_datetime(change['branch_release_date']) -
+            parse_datetime(change['review_create_date'])).total_seconds()
+    times = map(total_seconds, changes)
     print "Records: ", len(times)
     print "Mean:", datetime.timedelta(seconds=numpy.mean(times))
     print "Precentiles:"
     for percentile in (1, 10, 25, 50, 75, 90, 99):
-        print "%s%%: %s" % (percentile, datetime.timedelta(seconds=numpy.percentile(times, percentile)))
+        seconds = numpy.percentile(times, percentile)
+        time_delta = datetime.timedelta(seconds=seconds)
+        print "%s%%: %s" % (percentile, time_delta)
+
+
+def process_command(args):
+    print_stats(read_csv(args.csv_file))
 
 
 def main(args):
     parser = argparse.ArgumentParser()
     subparsers = parser.add_subparsers()
     fetch_parser = subparsers.add_parser('fetch')
+    fetch_parser.add_argument('--branch-limit', default=5)
     fetch_parser.set_defaults(func=fetch_command)
     process_parser = subparsers.add_parser('process')
     process_parser.add_argument('csv_file')
     process_parser.set_defaults(func=process_command)
     args = parser.parse_args(args)
     return args.func(args)
+
 
 if __name__ == "__main__":
     main(sys.argv[1:])
