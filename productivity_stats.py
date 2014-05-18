@@ -2,8 +2,11 @@
 
 import argparse
 import datetime
+import glob
+import fileinput
 import itertools
 import numpy
+import operator
 import re
 import requests
 import requests_cache
@@ -38,13 +41,15 @@ log = setup_logging()
 # Record first CQ time.
 # Blink Rolls
 # Reverts
-# Keep per-branch files in a directory.
 
 
 CACHE_LOCATION = 'productivity_stats_cache'
 
 # Default date format when stringifying python dates.
-PYTHON_DATE_FORMAT = "%Y-%m-%d %H:%M:%S.%f"
+PYTHON_DATE_FORMAT_MS = "%Y-%m-%d %H:%M:%S.%f"
+# Without milliseconds:
+PYTHON_DATE_FORMAT = "%Y-%m-%d %H:%M:%S"
+
 
 CSV_FIELD_ORDER = [
     'repository',
@@ -111,6 +116,10 @@ def path_for_branch(repository, name):
     return "%s/%s" % (repository['branch_heads'], name)
 
 
+def parse_datetime_ms(date_string):
+    return datetime.datetime.strptime(date_string, PYTHON_DATE_FORMAT_MS)
+
+
 def parse_datetime(date_string):
     return datetime.datetime.strptime(date_string, PYTHON_DATE_FORMAT)
 
@@ -123,7 +132,7 @@ def fetch_branch_release_times():
         history_text = requests.get(RELEASE_HISTORY_CSV_URL).text
     for line in history_text.strip('\n').split('\n'):
         os, channel, version, date_string = line.split(',')
-        date = parse_datetime(date_string)
+        date = parse_datetime_ms(date_string)
         branch = version.split('.')[2]
         last_date = release_times.get(branch)
         if not last_date or last_date > date:
@@ -147,10 +156,10 @@ def svn_revision_from_lines(lines, repository):
 
 
 def creation_date_for_review(review_id):
-    review_url = "%s/api/%s" % (RIETVELD_URL, review_id)
+    review_url = "%s/api/%s?messages=true" % (RIETVELD_URL, review_id)
     try:
         review_json = requests.get(review_url).json()
-        return parse_datetime(review_json["created"])
+        return parse_datetime_ms(review_json["created"])
     except ValueError:
         log.error("Error parsing: %s" % review_url)
 
@@ -190,8 +199,22 @@ def change_times(branch_names, branch_release_times, commit_id, branch, reposito
     return change
 
 
+def _convert_key(change, key):
+    value = change[key]
+    if value and key.endswith('_date'):
+        return value.strftime(PYTHON_DATE_FORMAT)
+    return str(value)
+
+
+def _convert_dates(field_value_tuple):
+    field, value = field_value_tuple
+    if field.endswith('_date'):
+        value = datetime.datetime.strptime(value, PYTHON_DATE_FORMAT)
+    return field, value
+
+
 def csv_line(change, fields):
-    return ",".join(map(lambda field: str(change[field]), fields))
+    return ",".join(map(lambda field: _convert_key(change, field), fields))
 
 
 def merge_base(repository_path, commit_one, commit_two=None):
@@ -223,13 +246,14 @@ def check_for_stale_checkout(repository, branch_names, branch_release_times):
     latest_released_branch = sorted(released_branches, key=int, reverse=True)[0]
     latest_local_branch = branch_names[0]
     if int(latest_local_branch) < int(latest_released_branch):
-        log.fatal("latest local branch %s is older than latest released branch %s in %s; run git fetch to update." %
-            (latest_local_branch, latest_released_branch, repository_path))
+        log.fatal("latest local branch %s is older than latest released branch %s in \"%s\" (%s); run git fetch to update." %
+            (latest_local_branch, latest_released_branch,
+                repository['relative_path'], repository['name']))
         subprocess.check_call(['git', 'fetch'], cwd=repository_path)
 
 
 def csv_path(branch, repository):
-    return os.path.join(CACHE_LOCATION, "%s_%s.csv" % (branch, repository))
+    return os.path.join(CACHE_LOCATION, "%s_%s.csv" % (branch, repository['name']))
 
 
 def validate_checkouts_and_fetch_branch_names(branch_release_times):
@@ -259,17 +283,17 @@ def fetch_command(args):
     for index in range(branch_limit):
         branch, previous_branch = branch_names[index], branch_names[index + 1]
         for repository in REPOSITORIES:
-            csv_file = sys.stdout
-            csv_file.write(",".join(CSV_FIELD_ORDER) + "\n")
-            commits = commits_new_in_branch(branch, previous_branch, repository)
-            log.info("%s commits between branch %s and %s in %s" %
-                (len(commits), branch, previous_branch, repository['name']))
-            for commit_id in commits:
-                change = change_times(branch_names, branch_release_times,
-                    commit_id, branch, repository)
-                if change:
-                    csv_file.write(csv_line(change, CSV_FIELD_ORDER) + "\n")
-            log.debug("Completed %s of %s branches" % (index + 1, branch_limit))
+            with open(csv_path(branch, repository), "w") as csv_file:
+                csv_file.write(",".join(CSV_FIELD_ORDER) + "\n")
+                commits = commits_new_in_branch(branch, previous_branch, repository)
+                log.info("%s commits between branch %s and %s in %s" %
+                    (len(commits), branch, previous_branch, repository['name']))
+                for commit_id in commits:
+                    change = change_times(branch_names, branch_release_times,
+                        commit_id, branch, repository)
+                    if change:
+                        csv_file.write(csv_line(change, CSV_FIELD_ORDER) + "\n")
+        log.debug("Completed %s of %s branches" % (index + 1, branch_limit))
 
 
 def split_csv_line(csv_line):
@@ -284,13 +308,16 @@ def read_csv(file_path):
             (fields, CSV_FIELD_ORDER))
         return 1
 
-    return [dict(zip(CSV_FIELD_ORDER, split_csv_line(line))) for line in csv_file]
+    return [dict(map(_convert_dates, zip(CSV_FIELD_ORDER, split_csv_line(line)))) for line in csv_file]
+
+
+def seconds_between_keys(change, earlier_key, later_key):
+    return int((change[later_key] - change[earlier_key]).total_seconds())
 
 
 def print_stats(changes):
     def total_seconds(change):
-        return (parse_datetime(change['branch_release_date']) -
-            parse_datetime(change['review_create_date'])).total_seconds()
+        return seconds_between_keys(change, 'branch_release_date', 'review_create_date')
     times = map(total_seconds, changes)
     print "Records: ", len(times)
     print "Mean:", datetime.timedelta(seconds=numpy.mean(times))
@@ -301,8 +328,33 @@ def print_stats(changes):
         print "%s%%: %s" % (percentile, time_delta)
 
 
-def process_command(args):
-    print_stats(read_csv(args.csv_file))
+def load_changes():
+    changes = []
+    for path in glob.iglob(os.path.join(CACHE_LOCATION, '*.csv')):
+        records = read_csv(path)
+        log.debug("%s changes in %s" % (len(records), path))
+        changes.extend(records)
+    return changes
+
+
+def stats_command(args):
+    changes = load_changes()
+    changes.sort(key=operator.itemgetter('repository', 'svn_revision'))
+    for repository, per_repo_changes in itertools.groupby(changes, key=operator.itemgetter('repository')):
+        print "\nRepository: %s" % repository
+        print_stats(per_repo_changes)
+
+
+def graph_command(args):
+    changes = load_changes()
+    changes.sort(key=operator.itemgetter('repository', 'svn_revision'))
+    for repository, per_repo_changes in itertools.groupby(changes, key=operator.itemgetter('repository')):
+        print "\nRepository: %s" % repository
+        print "['svn_revision', 'seconds_until_commit', 'seconds_until_release'],"
+        for change in per_repo_changes:
+            seconds_until_commit = seconds_between_keys(change, 'review_create_date', 'commit_date')
+            seconds_until_release = seconds_between_keys(change, 'review_create_date', 'branch_release_date')
+            print "[%s, %s, %s]," % (change['svn_revision'], seconds_until_commit, seconds_until_release)
 
 
 def main(args):
@@ -311,9 +363,10 @@ def main(args):
     fetch_parser = subparsers.add_parser('fetch')
     fetch_parser.add_argument('--branch-limit', default=5)
     fetch_parser.set_defaults(func=fetch_command)
-    process_parser = subparsers.add_parser('process')
-    process_parser.add_argument('csv_file')
-    process_parser.set_defaults(func=process_command)
+    stats_parser = subparsers.add_parser('stats')
+    stats_parser.set_defaults(func=stats_command)
+    graph_parser = subparsers.add_parser('graph')
+    graph_parser.set_defaults(func=graph_command)
     args = parser.parse_args(args)
     return args.func(args)
 
