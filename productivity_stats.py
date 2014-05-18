@@ -65,6 +65,8 @@ CSV_FIELD_ORDER = [
 
 # These are specific to Chrome and would need to be updated for Blink, etc.
 RIETVELD_URL = "https://codereview.chromium.org"
+
+# Times reported here are GMT, release-went-live times.
 RELEASE_HISTORY_CSV_URL = 'http://omahaproxy.appspot.com/history'
 
 # Authors which are expected to not have a review url.
@@ -175,7 +177,7 @@ def change_times(branch_names, branch_release_times, commit_id, branch, reposito
     log_text = subprocess.check_output(args, cwd=repository['relative_path'])
 
     lines = log_text.split("\n")
-    change['commit_date'] = datetime.datetime.fromtimestamp(int(lines.pop(0)))
+    change['commit_date'] = datetime.datetime.utcfromtimestamp(int(lines.pop(0)))
     change['commit_author'] = lines.pop(0)
     change['review_id'] = review_id_from_lines(lines)
     if not change['review_id']:
