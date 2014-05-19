@@ -66,10 +66,10 @@ CSV_FIELD_ORDER = [
 ]
 
 GRAPH_ORDERED_EVENTS = [
-    'review_create_date',
-    'review_sent_date',
-    'first_lgtm_date',
-    'first_cq_start_date',
+    # 'review_create_date',
+    # 'review_sent_date',
+    # 'first_lgtm_date',
+    # 'first_cq_start_date',
     'commit_date',
     'branch_release_date',
 ]
@@ -324,7 +324,12 @@ def fetch_command(args):
     for index in range(branch_limit):
         branch, previous_branch = branch_names[index], branch_names[index + 1]
         for repository in REPOSITORIES:
-            with open(csv_path(branch, repository), "w") as csv_file:
+            cache_path = csv_path(branch, repository)
+            # FIXME: Should have a --force option to override this.
+            if os.path.exists(cache_path):
+                log.info("%s exists, assuming up to date, skipping." % cache_path)
+                continue
+            with open(cache_path, "w") as csv_file:
                 csv_file.write(",".join(CSV_FIELD_ORDER) + "\n")
                 commits = commits_new_in_branch(branch, previous_branch, repository)
                 log.info("%s commits between branch %s and %s in %s" %
@@ -357,14 +362,15 @@ def seconds_between_keys(change, earlier_key, later_key):
 
 def print_stats(changes):
     def total_seconds(change):
-        return seconds_between_keys(change, 'review_create_date', 'branch_release_date')
+        return seconds_between_keys(change, 'commit_date', 'branch_release_date')
     times = map(total_seconds, changes)
     print "Records: ", len(times)
-    print "Mean:", datetime.timedelta(seconds=numpy.mean(times))
+    print "Branches: ", " ".join(sorted(set(map(lambda change: change['branch'], changes))))
+    print "Mean:", datetime.timedelta(seconds=int(numpy.mean(times)))
     print "Precentiles:"
     for percentile in (1, 10, 25, 50, 75, 90, 99):
         seconds = numpy.percentile(times, percentile)
-        time_delta = datetime.timedelta(seconds=seconds)
+        time_delta = datetime.timedelta(seconds=int(seconds))
         print "%s%%: %s" % (percentile, time_delta)
 
 
@@ -382,7 +388,8 @@ def stats_command(args):
     changes.sort(key=operator.itemgetter('repository', 'svn_revision'))
     for repository, per_repo_changes in itertools.groupby(changes, key=operator.itemgetter('repository')):
         print "\nRepository: %s" % repository
-        print_stats(per_repo_changes)
+        # print_stats may try to iterate over the iterator more than once, so make it a list.
+        print_stats(list(per_repo_changes))
 
 
 # FIXME: There must be a simpler way to write this.
@@ -414,7 +421,7 @@ def change_stats(change, ordered_events):
             # should ignore the LGTM time instead of the CQ time.
             log.debug("Time between %s and %s in %s is negative (%s), ignoring." % (event_name, reversed_names[previous_index], change['commit_id'], seconds))
             seconds = 0
-        results[event_name] = seconds
+        results[event_name] = int(seconds / 60)
     # FIXME: Need to sanity check that the sum of these stats is equal to
     # seconds_between_keys(change, 'review_create_date', 'branch_release_date')
     return results
@@ -432,6 +439,8 @@ def _json_list(stats, change, ordered_events):
 
 
 def graph_command(args):
+    # FIXME: chunk_size should be controlable via an argument.
+    chunk_size = 1
     ordered_events = GRAPH_ORDERED_EVENTS
     changes = load_changes()
     changes.sort(key=operator.itemgetter('repository', 'svn_revision'))
@@ -440,7 +449,7 @@ def graph_command(args):
         print ['svn_revision'] + ordered_events[1:], ","
         json_lists = [_json_list(change_stats(change, ordered_events), change, ordered_events) for change in per_repo_changes]
         # It's a bit odd to avg svn revisions, but whatever.
-        avg_jsons = [map(int, list(numpy.mean(chunk, axis=0))) for chunk in chunks(json_lists, 10)]
+        avg_jsons = [map(int, list(numpy.mean(chunk, axis=0))) for chunk in chunks(json_lists, chunk_size)]
         for json in avg_jsons:
             print json, ", "
         print "];"
@@ -465,7 +474,7 @@ def main(args):
     subparsers = parser.add_subparsers()
 
     fetch_parser = subparsers.add_parser('fetch')
-    fetch_parser.add_argument('--branch-limit', default=7)
+    fetch_parser.add_argument('--branch-limit', default=20)
     fetch_parser.set_defaults(func=fetch_command)
 
     stats_parser = subparsers.add_parser('stats')
