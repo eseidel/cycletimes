@@ -420,6 +420,17 @@ def change_stats(change, ordered_events):
     return results
 
 
+# http://stackoverflow.com/questions/312443/how-do-you-split-a-list-into-evenly-sized-chunks-in-python
+def chunks(l, n):
+    """ Yield successive n-sized chunks from l."""
+    for i in xrange(0, len(l), n):
+        yield l[i:i+n]
+
+
+def _json_list(stats, change, ordered_events):
+    return [int(change['svn_revision'])] + map(lambda name: int(stats[name]), ordered_events[1:])
+
+
 def graph_command(args):
     ordered_events = GRAPH_ORDERED_EVENTS
     changes = load_changes()
@@ -427,10 +438,11 @@ def graph_command(args):
     for repository, per_repo_changes in itertools.groupby(changes, key=operator.itemgetter('repository')):
         print "window.%s_stats = [" % repository
         print ['svn_revision'] + ordered_events[1:], ","
-        for change in per_repo_changes:
-            stats = change_stats(change, ordered_events)
-            json_list = [int(change['svn_revision'])] + map(lambda name: int(stats[name]), ordered_events[1:])
-            print json_list, ", // %s" % change['commit_id']
+        json_lists = [_json_list(change_stats(change, ordered_events), change, ordered_events) for change in per_repo_changes]
+        # It's a bit odd to avg svn revisions, but whatever.
+        avg_jsons = [map(int, list(numpy.mean(chunk, axis=0))) for chunk in chunks(json_lists, 10)]
+        for json in avg_jsons:
+            print json, ", "
         print "];"
 
 
