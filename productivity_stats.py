@@ -79,12 +79,14 @@ RIETVELD_URL = "https://codereview.chromium.org"
 # Times reported here are GMT, release-went-live times.
 RELEASE_HISTORY_CSV_URL = 'http://omahaproxy.appspot.com/history'
 
-IGNORED_AUTHORS = [
-    # Bots which are expected to not have a review url:
+# Bots which are expected to not have a review url:
+NO_REVIEW_URL_AUTHORS = [
     'chrome-admin@google.com',
     'chrome-release@google.com',
     'chromeos-lkgm@google.com',
+]
 
+BOT_AUTHORS = [
     'eseidel@chromium.org', # Blink AutoRollBot (uses the CQ).
     'ojan@chromium.org', # Blink AutoRebaselineBot, commits before sending mail.
 ]
@@ -207,7 +209,7 @@ def commit_times(commit_id, repository):
     change['review_id'] = review_id_from_lines(lines)
     # FIXME: Should probably filter during processing instead of fetching?
     if not change['review_id']:
-        if change['commit_author'] not in IGNORED_AUTHORS:
+        if change['commit_author'] not in NO_REVIEW_URL_AUTHORS:
             log.debug("Skipping %s from %s no Review URL" %
                 (commit_id, change['commit_author']))
         return None
@@ -369,6 +371,8 @@ def read_csv(file_path):
 def seconds_between_keys(change, earlier_key, later_key):
     earlier_date = change[earlier_key]
     later_date = change[later_key]
+    if earlier_date is None or later_date is None:
+        return 0
     seconds = int((later_date - earlier_date).total_seconds())
     if later_date < earlier_date:
         log.debug("Time between %s and %s in %s is negative (%s), ignoring." % (earlier_key, later_key, change['commit_id'], seconds))
@@ -398,7 +402,8 @@ def load_changes():
         records = read_csv(path)
         log.debug("%s changes in %s" % (len(records), path))
         changes.extend(records)
-    return changes
+    # FIXME: We may want to make filtering an explicit step?
+    return filter(lambda change: change['commit_author'] not in BOT_AUTHORS, changes)
 
 
 def stats_command(args):
