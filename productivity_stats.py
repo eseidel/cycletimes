@@ -37,7 +37,6 @@ log = setup_logging()
 # TODO:
 # Verify that timezones are correct for all timestamps!
 # (Timezones can mean hours, which is a lot of time!)
-# Record first LGTM time
 # Record first CQ time.
 # Blink Rolls
 # Reverts
@@ -59,6 +58,9 @@ CSV_FIELD_ORDER = [
     'review_id',
     'branch',
     'review_create_date',
+    'review_sent_date',
+    'first_lgtm_date',
+    'first_cq_start_date',
     'commit_date',
     'branch_release_date',
 ]
@@ -157,13 +159,26 @@ def svn_revision_from_lines(lines, repository):
             return int(match.group('svn_revision'))
 
 
-def creation_date_for_review(review_id):
+def fetch_review(review_id):
     review_url = "%s/api/%s?messages=true" % (RIETVELD_URL, review_id)
     try:
-        review_json = requests.get(review_url).json()
-        return parse_datetime_ms(review_json["created"])
+        return requests.get(review_url).json()
     except ValueError:
         log.error("Error parsing: %s" % review_url)
+
+
+def first_lgtm_date(review):
+    for message in review['messages']:
+        if message['approval']:
+            return parse_datetime_ms(message['date'])
+
+
+def first_cq_start_date(review):
+    for message in review['messages']:
+        # We could also look for "The CQ bit was checked by" instead
+        # but I'm not sure how long rietveld has been adding that.
+        if message['text'].startswith("CQ is trying da patch."):
+            return parse_datetime_ms(message['date'])
 
 
 def change_times(branch_names, branch_release_times, commit_id, branch, repository):
@@ -179,6 +194,8 @@ def change_times(branch_names, branch_release_times, commit_id, branch, reposito
     lines = log_text.split("\n")
     change['commit_date'] = datetime.datetime.utcfromtimestamp(int(lines.pop(0)))
     change['commit_author'] = lines.pop(0)
+    change['branch_release_date'] = branch_release_times[branch]
+
     change['review_id'] = review_id_from_lines(lines)
     if not change['review_id']:
         if change['commit_author'] not in IGNORED_AUTHORS:
@@ -186,17 +203,15 @@ def change_times(branch_names, branch_release_times, commit_id, branch, reposito
                 (commit_id, change['commit_author']))
         return None
 
-    change['review_create_date'] = creation_date_for_review(change['review_id'])
-    if not change['review_create_date']:
+    review = fetch_review(change['review_id'])
+    if not review:
         log.debug("Skipping %s, failed to fetch/parse review JSON." % commit_id)
         return None
+    change['review_create_date'] = parse_datetime_ms(review["created"])
+    change['review_sent_date'] = parse_datetime_ms(review["messages"][0]['date'])
+    change['first_lgtm_date'] = first_lgtm_date(review)
+    change['first_cq_start_date'] = first_cq_start_date(review)
     change['svn_revision'] = svn_revision_from_lines(lines, repository)
-
-    change['branch_release_date'] = branch_release_times.get(branch)
-    # Branches are pre-filtered to include only released branches.
-    if not change['branch_release_date']:
-        log.error("No release date for %s???" % branch)
-        return None
 
     return change
 
@@ -210,6 +225,8 @@ def _convert_key(change, key):
 
 def _convert_dates(field_value_tuple):
     field, value = field_value_tuple
+    if value == 'None':
+        return field, None
     if field.endswith('_date'):
         value = datetime.datetime.strptime(value, PYTHON_DATE_FORMAT)
     return field, value
@@ -263,6 +280,11 @@ def validate_checkouts_and_fetch_branch_names(branch_release_times):
     for repository in REPOSITORIES:
         recent_branches = fetch_recent_branches(repository)
         # Filter out any non-released branches (failed to build, etc.)
+        # According to Laforge, Canaries fail to release for 3 reasons:
+        # 1. Official Build/Compile is broken.
+        # 2. Signing failed.
+        # 3. Insufficient builds to bother (weekends, holidays)
+        # Right now we don't track a separate time-diff/reason for non-released builds, but should.
         filtered_branches = filter(lambda name: name in branch_release_times, recent_branches)
 
         check_for_stale_checkout(repository, recent_branches, branch_release_times)
@@ -347,23 +369,60 @@ def stats_command(args):
         print_stats(per_repo_changes)
 
 
+# FIXME: There must be a simpler way to write this.
+def change_stats(change, ordered_events):
+    results = {}
+    reversed_names = list(reversed(ordered_events))
+    for index, event_name in enumerate(reversed_names):
+        date = change[event_name]
+        if not date:
+            results[event_name] = 0
+            continue
+
+        previous_index = index + 1
+        previous_date = None
+        while previous_index < len(reversed_names) and not previous_date:
+            previous_name = reversed_names[previous_index]
+            previous_date = change[previous_name]
+            previous_index += 1
+
+        if not previous_date:
+            continue
+
+        seconds = (date - previous_date).total_seconds()
+        if seconds < 0:
+            # FIXME: This isn't quite right, we should skip these entries entirely.
+            log.debug("Time between %s and %s in %s is negative (%s), ignoring." % (event_name, reversed_names[previous_index], change['commit_id'], seconds))
+            seconds = 0
+        results[event_name] = seconds
+    return results
+
+
 def graph_command(args):
+    ordered_events = [
+        'review_create_date',
+        'review_sent_date',
+        'first_lgtm_date',
+        'first_cq_start_date',
+        'commit_date',
+        'branch_release_date',
+    ]
+
     changes = load_changes()
     changes.sort(key=operator.itemgetter('repository', 'svn_revision'))
     for repository, per_repo_changes in itertools.groupby(changes, key=operator.itemgetter('repository')):
         print "\nRepository: %s" % repository
-        print "['svn_revision', 'seconds_until_commit', 'seconds_until_release'],"
+        print ordered_events[1:]
         for change in per_repo_changes:
-            seconds_until_commit = seconds_between_keys(change, 'review_create_date', 'commit_date')
-            seconds_until_release = seconds_between_keys(change, 'review_create_date', 'branch_release_date')
-            print "[%s, %s, %s]," % (change['svn_revision'], seconds_until_commit, seconds_until_release)
+            stats = change_stats(change, ordered_events)
+            print map(lambda name: stats[name], ordered_events[1:]), " // %s" % change['commit_id']
 
 
 def main(args):
     parser = argparse.ArgumentParser()
     subparsers = parser.add_subparsers()
     fetch_parser = subparsers.add_parser('fetch')
-    fetch_parser.add_argument('--branch-limit', default=5)
+    fetch_parser.add_argument('--branch-limit', default=7)
     fetch_parser.set_defaults(func=fetch_command)
     stats_parser = subparsers.add_parser('stats')
     stats_parser.set_defaults(func=stats_command)
