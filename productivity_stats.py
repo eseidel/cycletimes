@@ -190,6 +190,7 @@ def first_cq_start_date(review):
         if message['text'].startswith("CQ is trying da patch."):
             return parse_datetime_ms(message['date'])
 
+
 def commit_times(commit_id, repository):
     change = {
         'commit_id': commit_id,
@@ -446,24 +447,27 @@ def debug_command(args):
         print key, stats.get(key)
 
 
-
 def main(args):
     parser = argparse.ArgumentParser()
     parser.add_argument('chrome_path')
     subparsers = parser.add_subparsers()
+
     fetch_parser = subparsers.add_parser('fetch')
     fetch_parser.add_argument('--branch-limit', default=7)
     fetch_parser.set_defaults(func=fetch_command)
+
     stats_parser = subparsers.add_parser('stats')
     stats_parser.set_defaults(func=stats_command)
+
     graph_parser = subparsers.add_parser('graph')
     graph_parser.set_defaults(func=graph_command)
+
     debug_parser = subparsers.add_parser('debug')
     debug_parser.set_defaults(func=debug_command)
     debug_parser.add_argument('repository_name')
     debug_parser.add_argument('commit_id')
-    args = parser.parse_args(args)
 
+    args = parser.parse_args(args)
     # This script assume's its being run from the root of a chrome checkout
     # we could remove this restriction by fixing uses of the REPOSITORIES
     # relative_path key.
