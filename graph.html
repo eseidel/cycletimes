@@ -1,0 +1,28 @@
+<html>
+  <head>
+    <script type="text/javascript" src="https://www.google.com/jsapi"></script>
+    <script src='graph_data.js'></script>
+    <script type="text/javascript">
+      google.load("visualization", "1", {packages:["corechart"]});
+      google.setOnLoadCallback(drawChart);
+      function drawChart() {
+        console.log(window.chrome_stats)
+        var data = google.visualization.arrayToDataTable(window.chrome_stats);
+
+        var options = {
+          title: 'Seconds from Upload to Release',
+          vAxis: {
+            logScale: true,
+          },
+          isStacked: true,
+        };
+
+        var chart = new google.visualization.AreaChart(document.getElementById('chart_div'));
+        chart.draw(data, options);
+      }
+    </script>
+  </head>
+  <body>
+    <div id="chart_div" style="width: 1200px; height: 500px;"></div>
+  </body>
+</html>

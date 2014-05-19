@@ -414,6 +414,8 @@ def change_stats(change, ordered_events):
             log.debug("Time between %s and %s in %s is negative (%s), ignoring." % (event_name, reversed_names[previous_index], change['commit_id'], seconds))
             seconds = 0
         results[event_name] = seconds
+    # FIXME: Need to sanity check that the sum of these stats is equal to
+    # seconds_between_keys(change, 'review_create_date', 'branch_release_date')
     return results
 
 
@@ -422,11 +424,13 @@ def graph_command(args):
     changes = load_changes()
     changes.sort(key=operator.itemgetter('repository', 'svn_revision'))
     for repository, per_repo_changes in itertools.groupby(changes, key=operator.itemgetter('repository')):
-        print "\nRepository: %s" % repository
-        print ordered_events[1:]
+        print "window.%s_stats = [" % repository
+        print ['svn_revision'] + ordered_events[1:], ","
         for change in per_repo_changes:
             stats = change_stats(change, ordered_events)
-            print map(lambda name: stats[name], ordered_events[1:]), " // %s" % change['commit_id']
+            json_list = [int(change['svn_revision'])] + map(lambda name: int(stats[name]), ordered_events[1:])
+            print json_list, ", // %s" % change['commit_id']
+        print "];"
 
 
 def debug_command(args):
