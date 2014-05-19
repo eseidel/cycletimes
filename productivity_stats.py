@@ -79,11 +79,14 @@ RIETVELD_URL = "https://codereview.chromium.org"
 # Times reported here are GMT, release-went-live times.
 RELEASE_HISTORY_CSV_URL = 'http://omahaproxy.appspot.com/history'
 
-# Authors which are expected to not have a review url.
 IGNORED_AUTHORS = [
+    # Bots which are expected to not have a review url:
     'chrome-admin@google.com',
     'chrome-release@google.com',
     'chromeos-lkgm@google.com',
+
+    'eseidel@chromium.org', # Blink AutoRollBot (uses the CQ).
+    'ojan@chromium.org', # Blink AutoRebaselineBot, commits before sending mail.
 ]
 
 REPOSITORIES = [
@@ -202,6 +205,7 @@ def commit_times(commit_id, repository):
     change['commit_author'] = lines.pop(0)
 
     change['review_id'] = review_id_from_lines(lines)
+    # FIXME: Should probably filter during processing instead of fetching?
     if not change['review_id']:
         if change['commit_author'] not in IGNORED_AUTHORS:
             log.debug("Skipping %s from %s no Review URL" %
@@ -213,7 +217,11 @@ def commit_times(commit_id, repository):
         log.debug("Skipping %s, failed to fetch/parse review JSON." % commit_id)
         return None
     change['review_create_date'] = parse_datetime_ms(review["created"])
-    change['review_sent_date'] = parse_datetime_ms(review["messages"][0]['date'])
+    if review["messages"]:
+        change['review_sent_date'] = parse_datetime_ms(review["messages"][0]['date'])
+    else:
+        log.error('Review %s from %s has 0 messages??' % (change['review_id'], change['commit_id']))
+        change['review_sent_date'] = None 
     change['first_lgtm_date'] = first_lgtm_date(review)
     change['first_cq_start_date'] = first_cq_start_date(review)
     change['svn_revision'] = svn_revision_from_lines(lines, repository)
@@ -320,12 +328,16 @@ def fetch_command(args):
     if not os.path.exists(CACHE_LOCATION):
         os.makedirs(CACHE_LOCATION)
 
-    for index in range(branch_limit):
-        branch, previous_branch = branch_names[index], branch_names[index + 1]
+    if args.branch:
+        index = branch_names.index(args.branch)
+        branch_pairs = [(branch_names[index], branch_names[index + 1])]
+    else:
+        branch_pairs = [(branch_names[index], branch_names[index + 1]) for index in range(branch_limit)]
+
+    for branch, previous_branch in branch_pairs:
         for repository in REPOSITORIES:
             cache_path = csv_path(branch, repository)
-            # FIXME: Should have a --force option to override this.
-            if os.path.exists(cache_path):
+            if not args.force and os.path.exists(cache_path):
                 log.info("%s exists, assuming up to date, skipping." % cache_path)
                 continue
             with open(cache_path, "w") as csv_file:
@@ -337,7 +349,6 @@ def fetch_command(args):
                     change = change_times(commit_id, branch, repository, branch_release_times)
                     if change:
                         csv_file.write(csv_line(change, CSV_FIELD_ORDER) + "\n")
-        log.debug("Completed %s of %s branches" % (index + 1, branch_limit))
 
 
 def split_csv_line(csv_line):
@@ -499,7 +510,9 @@ def main(args):
     subparsers = parser.add_subparsers()
 
     fetch_parser = subparsers.add_parser('fetch')
+    fetch_parser.add_argument('--force', action='store_true')
     fetch_parser.add_argument('--branch-limit', default=20)
+    fetch_parser.add_argument('branch', action='store')
     fetch_parser.set_defaults(func=fetch_command)
 
     stats_parser = subparsers.add_parser('stats')
