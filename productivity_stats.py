@@ -37,7 +37,6 @@ log = setup_logging()
 # TODO:
 # Verify that timezones are correct for all timestamps!
 # (Timezones can mean hours, which is a lot of time!)
-# Record first CQ time.
 # Blink Rolls
 # Reverts
 
@@ -372,8 +371,8 @@ def print_stats(changes):
     times = map(lambda change: seconds_between_keys(change, from_key, to_key), changes)
     print "From: ", from_key
     print "To: ", to_key
-    print "Records: ", len(times)
     print "Branches: ", " ".join(sorted(set(map(lambda change: change['branch'], changes))))
+    print "Commits: ", len(times)
     print "Mean:", datetime.timedelta(seconds=int(numpy.mean(times)))
     print "Precentiles:"
     for percentile in (1, 10, 25, 50, 75, 90, 99):
