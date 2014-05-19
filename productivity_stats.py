@@ -65,6 +65,15 @@ CSV_FIELD_ORDER = [
     'branch_release_date',
 ]
 
+GRAPH_ORDERED_EVENTS = [
+    'review_create_date',
+    'review_sent_date',
+    'first_lgtm_date',
+    'first_cq_start_date',
+    'commit_date',
+    'branch_release_date',
+]
+
 # These are specific to Chrome and would need to be updated for Blink, etc.
 RIETVELD_URL = "https://codereview.chromium.org"
 
@@ -121,7 +130,8 @@ def path_for_branch(repository, name):
 
 
 def parse_datetime_ms(date_string):
-    return datetime.datetime.strptime(date_string, PYTHON_DATE_FORMAT_MS)
+    # Microseconds just make debug printing ugly.
+    return datetime.datetime.strptime(date_string, PYTHON_DATE_FORMAT_MS).replace(microsecond = 0)
 
 
 def parse_datetime(date_string):
@@ -180,21 +190,16 @@ def first_cq_start_date(review):
         if message['text'].startswith("CQ is trying da patch."):
             return parse_datetime_ms(message['date'])
 
-
-def change_times(branch_names, branch_release_times, commit_id, branch, repository):
+def commit_times(commit_id, repository):
     change = {
-        'repository': repository['name'],
         'commit_id': commit_id,
-        'branch': branch,
     }
-
     args = ['git', 'log', '-1', '--pretty=format:%ct%n%cn%n%b', commit_id]
     log_text = subprocess.check_output(args, cwd=repository['relative_path'])
 
     lines = log_text.split("\n")
     change['commit_date'] = datetime.datetime.utcfromtimestamp(int(lines.pop(0)))
     change['commit_author'] = lines.pop(0)
-    change['branch_release_date'] = branch_release_times[branch]
 
     change['review_id'] = review_id_from_lines(lines)
     if not change['review_id']:
@@ -212,7 +217,18 @@ def change_times(branch_names, branch_release_times, commit_id, branch, reposito
     change['first_lgtm_date'] = first_lgtm_date(review)
     change['first_cq_start_date'] = first_cq_start_date(review)
     change['svn_revision'] = svn_revision_from_lines(lines, repository)
+    return change
 
+
+def change_times(commit_id, branch, repository, branch_release_times):
+    change = commit_times(commit_id, repository)
+    if not change:
+        return None
+    change.update({
+        'repository': repository['name'],
+        'branch': branch,
+        'branch_release_date': branch_release_times[branch],
+    })
     return change
 
 
@@ -313,8 +329,7 @@ def fetch_command(args):
                 log.info("%s commits between branch %s and %s in %s" %
                     (len(commits), branch, previous_branch, repository['name']))
                 for commit_id in commits:
-                    change = change_times(branch_names, branch_release_times,
-                        commit_id, branch, repository)
+                    change = change_times(commit_id, branch, repository, branch_release_times)
                     if change:
                         csv_file.write(csv_line(change, CSV_FIELD_ORDER) + "\n")
         log.debug("Completed %s of %s branches" % (index + 1, branch_limit))
@@ -379,12 +394,12 @@ def change_stats(change, ordered_events):
             results[event_name] = 0
             continue
 
-        previous_index = index + 1
+        previous_index = index
         previous_date = None
-        while previous_index < len(reversed_names) and not previous_date:
+        while previous_index + 1 < len(reversed_names) and not previous_date:
+            previous_index += 1
             previous_name = reversed_names[previous_index]
             previous_date = change[previous_name]
-            previous_index += 1
 
         if not previous_date:
             continue
@@ -392,6 +407,10 @@ def change_stats(change, ordered_events):
         seconds = (date - previous_date).total_seconds()
         if seconds < 0:
             # FIXME: This isn't quite right, we should skip these entries entirely.
+            # FIXME: This ignores the later event, when we probably should be ignoring
+            # the previous event which came in late instead.
+            # It's common to TBR a patch and get a belated LGTM, for instance, but we
+            # should ignore the LGTM time instead of the CQ time.
             log.debug("Time between %s and %s in %s is negative (%s), ignoring." % (event_name, reversed_names[previous_index], change['commit_id'], seconds))
             seconds = 0
         results[event_name] = seconds
@@ -399,15 +418,7 @@ def change_stats(change, ordered_events):
 
 
 def graph_command(args):
-    ordered_events = [
-        'review_create_date',
-        'review_sent_date',
-        'first_lgtm_date',
-        'first_cq_start_date',
-        'commit_date',
-        'branch_release_date',
-    ]
-
+    ordered_events = GRAPH_ORDERED_EVENTS
     changes = load_changes()
     changes.sort(key=operator.itemgetter('repository', 'svn_revision'))
     for repository, per_repo_changes in itertools.groupby(changes, key=operator.itemgetter('repository')):
@@ -418,10 +429,24 @@ def graph_command(args):
             print map(lambda name: stats[name], ordered_events[1:]), " // %s" % change['commit_id']
 
 
+def debug_command(args):
+    repository = next(r for r in REPOSITORIES if r['name'] == args.repository_name)
+    change = commit_times(args.commit_id, repository)
+    for key in CSV_FIELD_ORDER:
+        print key, change.get(key)
+
+    print
+    change['branch_release_date'] = change['commit_date'] # Prevent exception.
+    stats = change_stats(change, GRAPH_ORDERED_EVENTS)
+    for key in GRAPH_ORDERED_EVENTS:
+        print key, stats.get(key)
+
+
+
 def main(args):
     parser = argparse.ArgumentParser()
-    subparsers = parser.add_subparsers()
     parser.add_argument('chrome_path')
+    subparsers = parser.add_subparsers()
     fetch_parser = subparsers.add_parser('fetch')
     fetch_parser.add_argument('--branch-limit', default=7)
     fetch_parser.set_defaults(func=fetch_command)
@@ -429,6 +454,10 @@ def main(args):
     stats_parser.set_defaults(func=stats_command)
     graph_parser = subparsers.add_parser('graph')
     graph_parser.set_defaults(func=graph_command)
+    debug_parser = subparsers.add_parser('debug')
+    debug_parser.set_defaults(func=debug_command)
+    debug_parser.add_argument('repository_name')
+    debug_parser.add_argument('commit_id')
     args = parser.parse_args(args)
 
     # This script assume's its being run from the root of a chrome checkout
