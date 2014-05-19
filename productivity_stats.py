@@ -66,10 +66,10 @@ CSV_FIELD_ORDER = [
 ]
 
 GRAPH_ORDERED_EVENTS = [
-    # 'review_create_date',
-    # 'review_sent_date',
-    # 'first_lgtm_date',
-    # 'first_cq_start_date',
+    'review_create_date',
+    'review_sent_date',
+    'first_lgtm_date',
+    'first_cq_start_date',
     'commit_date',
     'branch_release_date',
 ]
@@ -357,13 +357,21 @@ def read_csv(file_path):
 
 
 def seconds_between_keys(change, earlier_key, later_key):
-    return int((change[later_key] - change[earlier_key]).total_seconds())
+    earlier_date = change[earlier_key]
+    later_date = change[later_key]
+    seconds = int((later_date - earlier_date).total_seconds())
+    if later_date < earlier_date:
+        log.debug("Time between %s and %s in %s is negative (%s), ignoring." % (earlier_key, later_key, change['commit_id'], seconds))
+        return 0
+    return seconds
 
 
 def print_stats(changes):
-    def total_seconds(change):
-        return seconds_between_keys(change, 'commit_date', 'branch_release_date')
-    times = map(total_seconds, changes)
+    from_key = 'review_sent_date'
+    to_key = 'commit_date'
+    times = map(lambda change: seconds_between_keys(change, from_key, to_key), changes)
+    print "From: ", from_key
+    print "To: ", to_key
     print "Records: ", len(times)
     print "Branches: ", " ".join(sorted(set(map(lambda change: change['branch'], changes))))
     print "Mean:", datetime.timedelta(seconds=int(numpy.mean(times)))
@@ -440,7 +448,7 @@ def _json_list(stats, change, ordered_events):
 
 def graph_command(args):
     # FIXME: chunk_size should be controlable via an argument.
-    chunk_size = 1
+    chunk_size = 10
     ordered_events = GRAPH_ORDERED_EVENTS
     changes = load_changes()
     changes.sort(key=operator.itemgetter('repository', 'svn_revision'))
