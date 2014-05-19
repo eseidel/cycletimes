@@ -3,13 +3,14 @@
     <script type="text/javascript" src="https://www.google.com/jsapi"></script>
     <script src='graph_data.js'></script>
     <script type="text/javascript">
-      google.load("visualization", "1", {packages:["corechart"]});
+    // Most of this is from http://jsfiddle.net/asgallant/WaUu2/
+      google.load("visualization", "1", {packages:["controls"]});
       google.setOnLoadCallback(drawChart);
       function drawChart() {
         console.log(window.chrome_stats)
         var data = google.visualization.arrayToDataTable(window.chrome_stats);
 
-        var options = {
+        var chartOptions = {
           title: 'Minutes from Commit to Release',
           hAxis: {
             title: 'Revision',
@@ -20,12 +21,73 @@
           isStacked: true,
         };
 
-        var chart = new google.visualization.AreaChart(document.getElementById('chart_div'));
-        chart.draw(data, options);
-      }
+        var columnsTable = new google.visualization.DataTable();
+        columnsTable.addColumn('number', 'colIndex');
+        columnsTable.addColumn('string', 'colLabel');
+        var initState= {selectedValues: []};
+        // put the columns into this data table (skip column 0)
+        for (var i = 1; i < data.getNumberOfColumns(); i++) {
+            columnsTable.addRow([i, data.getColumnLabel(i)]);
+            // you can comment out this next line if you want to have a default selection other than the whole list
+            initState.selectedValues.push(data.getColumnLabel(i));
+        }
+        // you can set individual columns to be the default columns (instead of populating via the loop above) like this:
+        // initState.selectedValues.push(data.getColumnLabel(4));
+        
+        var chart = new google.visualization.ChartWrapper({
+            chartType: 'AreaChart',
+            containerId: 'chart_div',
+            dataTable: data,
+            options: chartOptions,
+        });
+        
+        var columnFilter = new google.visualization.ControlWrapper({
+            controlType: 'CategoryFilter',
+            containerId: 'colFilter_div',
+            dataTable: columnsTable,
+            options: {
+                filterColumnLabel: 'colLabel',
+                ui: {
+                    label: 'Columns',
+                    allowTyping: false,
+                    allowMultiple: true,
+                    allowNone: false,
+                    selectedValuesLayout: 'belowStacked'
+                }
+            },
+            state: initState
+        });
+        
+        function setChartView () {
+            var state = columnFilter.getState();
+            var row;
+            var view = {
+                columns: [0]
+            };
+            for (var i = 0; i < state.selectedValues.length; i++) {
+                row = columnsTable.getFilteredRows([{column: 1, value: state.selectedValues[i]}])[0];
+                view.columns.push(columnsTable.getValue(row, 0));
+            }
+            // sort the indices into their original order
+            view.columns.sort(function (a, b) {
+                return (a - b);
+            });
+            chart.setView(view);
+            chart.draw();
+        }
+        google.visualization.events.addListener(columnFilter, 'statechange', setChartView);
+        
+        setChartView();
+        columnFilter.draw();
+    }
     </script>
   </head>
+
+<script>
+
+</script>
   <body>
+    <div id="colFilter_div"></div>
     <div id="chart_div" style="width: 1200px; height: 500px;"></div>
   </body>
 </html>

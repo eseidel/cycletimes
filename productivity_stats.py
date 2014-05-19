@@ -446,6 +446,24 @@ def _json_list(stats, change, ordered_events):
     return [int(change['svn_revision'])] + map(lambda name: int(stats[name]), ordered_events[1:])
 
 
+# http://stackoverflow.com/questions/6998245/iterate-over-a-window-of-adjacent-elements-in-python
+def window(seq, n=2):
+    "Returns a sliding window (of width n) over data from the iterable"
+    "   s -> (s0,s1,...s[n-1]), (s1,s2,...,sn), ...                   "
+    it = iter(seq)
+    result = tuple(itertools.islice(it, n))
+    if len(result) == n:
+        yield result
+    for elem in it:
+        result = result[1:] + (elem,)
+        yield result
+
+
+def diff_names(ordered_events):
+    # remove "_date" from the end of each name.
+    return ['%s_to_%s' % (first[:-5], second[:-5]) for first, second in window(ordered_events)]
+
+
 def graph_command(args):
     # FIXME: chunk_size should be controlable via an argument.
     chunk_size = 10
@@ -454,7 +472,7 @@ def graph_command(args):
     changes.sort(key=operator.itemgetter('repository', 'svn_revision'))
     for repository, per_repo_changes in itertools.groupby(changes, key=operator.itemgetter('repository')):
         print "window.%s_stats = [" % repository
-        print ['svn_revision'] + ordered_events[1:], ","
+        print ['svn_revision'] + diff_names(ordered_events), ","
         json_lists = [_json_list(change_stats(change, ordered_events), change, ordered_events) for change in per_repo_changes]
         # It's a bit odd to avg svn revisions, but whatever.
         avg_jsons = [map(int, list(numpy.mean(chunk, axis=0))) for chunk in chunks(json_lists, chunk_size)]
