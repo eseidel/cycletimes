@@ -341,7 +341,7 @@ def seconds_between_keys(change, earlier_key, later_key):
 
 def print_stats(changes):
     def total_seconds(change):
-        return seconds_between_keys(change, 'branch_release_date', 'review_create_date')
+        return seconds_between_keys(change, 'review_create_date', 'branch_release_date')
     times = map(total_seconds, changes)
     print "Records: ", len(times)
     print "Mean:", datetime.timedelta(seconds=numpy.mean(times))
