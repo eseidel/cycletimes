@@ -421,6 +421,7 @@ def graph_command(args):
 def main(args):
     parser = argparse.ArgumentParser()
     subparsers = parser.add_subparsers()
+    parser.add_argument('chrome_path')
     fetch_parser = subparsers.add_parser('fetch')
     fetch_parser.add_argument('--branch-limit', default=7)
     fetch_parser.set_defaults(func=fetch_command)
@@ -429,6 +430,11 @@ def main(args):
     graph_parser = subparsers.add_parser('graph')
     graph_parser.set_defaults(func=graph_command)
     args = parser.parse_args(args)
+
+    # This script assume's its being run from the root of a chrome checkout
+    # we could remove this restriction by fixing uses of the REPOSITORIES
+    # relative_path key.
+    os.chdir(args.chrome_path)
     return args.func(args)
 
 
