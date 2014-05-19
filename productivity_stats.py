@@ -512,7 +512,7 @@ def main(args):
     fetch_parser = subparsers.add_parser('fetch')
     fetch_parser.add_argument('--force', action='store_true')
     fetch_parser.add_argument('--branch-limit', default=20)
-    fetch_parser.add_argument('branch', action='store')
+    fetch_parser.add_argument('--branch', action='store')
     fetch_parser.set_defaults(func=fetch_command)
 
     stats_parser = subparsers.add_parser('stats')
