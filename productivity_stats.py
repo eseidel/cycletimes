@@ -479,6 +479,15 @@ def diff_names(ordered_events):
     return ['%s_to_%s' % (first[:-5], second[:-5]) for first, second in window(ordered_events)]
 
 
+def remove_outliers(lists, std_devs=2):
+    means = numpy.mean(lists, axis=0)
+    stds = numpy.multiply(numpy.array([std_devs] * len(lists[0])), numpy.std(lists, axis=0))
+    # data - np.mean(data)) < m * np.std(data)
+    # We only want the data if all of the parts are < N std_devs from the mean.
+    # Which means abs(data - means) - (N * std_devs) < 0.
+    return filter(lambda data: all(numpy.signbit(numpy.subtract(numpy.absolute(numpy.subtract(data, means)), stds))), lists)
+
+
 def graph_command(args):
     # FIXME: chunk_size should be controlable via an argument.
     chunk_size = 10
@@ -489,6 +498,7 @@ def graph_command(args):
         print "window.%s_stats = [" % repository
         print ['svn_revision'] + diff_names(ordered_events), ","
         json_lists = [_json_list(change_stats(change, ordered_events), change, ordered_events) for change in per_repo_changes]
+        json_lists = remove_outliers(json_lists)
         # It's a bit odd to avg svn revisions, but whatever.
         avg_jsons = [map(int, list(numpy.mean(chunk, axis=0))) for chunk in chunks(json_lists, chunk_size)]
         for json in avg_jsons:
