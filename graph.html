@@ -5,9 +5,14 @@
     <script type="text/javascript">
     // Most of this is from http://jsfiddle.net/asgallant/WaUu2/
       google.load("visualization", "1", {packages:["controls"]});
-      google.setOnLoadCallback(drawChart);
-      function drawChart() {
-        var data = google.visualization.arrayToDataTable(window.blink_stats);
+      google.setOnLoadCallback(loadedCharts);
+      function loadedCharts() {
+        setupChart('chrome_chart', 'chrome_filter', window.chrome_stats);
+        setupChart('blink_chart', 'blink_filter', window.blink_stats);
+       }
+
+      function setupChart(chart_div, filter_div, data_array) {
+        var data = google.visualization.arrayToDataTable(data_array);
 
         var chartOptions = {
           title: 'Minutes from Commit to Release',
@@ -35,14 +40,14 @@
         
         var chart = new google.visualization.ChartWrapper({
             chartType: 'AreaChart',
-            containerId: 'chart_div',
+            containerId: chart_div,
             dataTable: data,
             options: chartOptions,
         });
         
         var columnFilter = new google.visualization.ControlWrapper({
             controlType: 'CategoryFilter',
-            containerId: 'colFilter_div',
+            containerId: filter_div,
             dataTable: columnsTable,
             options: {
                 filterColumnLabel: 'colLabel',
@@ -86,7 +91,11 @@
 
 </script>
   <body>
-    <div id="colFilter_div"></div>
-    <div id="chart_div" style="width: 1200px; height: 500px;"></div>
+    <h1>Chrome</h1>
+    <div id="chrome_filter"></div>
+    <div id="chrome_chart" style="width: 1200px; height: 500px;"></div>
+    <h1>Blink</h1>
+    <div id="blink_filter"></div>
+    <div id="blink_chart" style="width: 1200px; height: 500px;"></div>
   </body>
 </html>
