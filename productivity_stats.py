@@ -39,6 +39,9 @@ log = setup_logging()
 # (Timezones can mean hours, which is a lot of time!)
 # Blink Rolls
 # Reverts
+# Could show what % of time was due to tree-closures by overlapping lgtm -> commit time with tree closure data?
+# Could show what % of tiem was due to CQ by overlapping CQ data with lgtm -> commit time.
+# Want to show what % of a typical patch time is spent waiting for X.
 
 
 CACHE_LOCATION = 'productivity_stats_cache'
@@ -291,7 +294,7 @@ def check_for_stale_checkout(repository, branch_names, branch_release_times):
     latest_released_branch = sorted(released_branches, key=int, reverse=True)[0]
     latest_local_branch = branch_names[0]
     if int(latest_local_branch) < int(latest_released_branch):
-        log.fatal("latest local branch %s is older than latest released branch %s in \"%s\" (%s); run git fetch to update." %
+        log.warn("Latest local branch %s is older than latest released branch %s in \"%s\" (%s); running git fetch to update." %
             (latest_local_branch, latest_released_branch,
                 repository['relative_path'], repository['name']))
         subprocess.check_call(['git', 'fetch'], cwd=repository_path)
