@@ -391,7 +391,9 @@ def seconds_between_keys(change, earlier_key, later_key):
         return 0
     seconds = int((later_date - earlier_date).total_seconds())
     if later_date < earlier_date:
-        log.warn("Time between %s and %s in %s is negative (%s), ignoring." % (earlier_key, later_key, change['commit_id'], seconds))
+        # review_sent_date to commit_date is negative for all manual commits.
+        if earlier_key != 'review_sent_date' or later_key != 'commit_date':
+            log.warn("Time between %s and %s in %s is negative (%s), ignoring." % (earlier_key, later_key, change['commit_id'], seconds))
         return 0
     return seconds
 
