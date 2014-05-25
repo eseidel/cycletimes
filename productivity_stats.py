@@ -43,6 +43,9 @@ log = setup_logging()
 # Could show what % of tiem was due to CQ by overlapping CQ data with lgtm -> commit time.
 # Want to show what % of a typical patch time is spent waiting for X.
 
+# Want a breakdown of what the median time spent in each phase is.
+# To answer the question of what phases do we need to make faster.
+
 
 CACHE_LOCATION = 'productivity_stats_cache'
 
@@ -178,10 +181,14 @@ def svn_revision_from_lines(lines, repository):
 
 def fetch_review(review_id):
     review_url = "%s/api/%s?messages=true" % (RIETVELD_URL, review_id)
+    response = requests.get(review_url)
     try:
-        return requests.get(review_url).json()
-    except ValueError:
-        log.error("Error parsing: %s" % review_url)
+        return response.json()
+    except ValueError, e:
+        if "Sign in" in response.text:
+            log.error("%s is restricted" % review_url)
+        else:
+            log.error("Unknown error parsing %s (%s)" % (review_url, e))
 
 
 def first_lgtm_date(review):
@@ -240,7 +247,7 @@ def change_times(commit_id, branch, repository, branch_release_times):
     change.update({
         'repository': repository['name'],
         'branch': branch,
-        'branch_release_date': branch_release_times[branch],
+        'branch_release_date': branch_release_times.get(branch),
     })
     return change
 
@@ -320,7 +327,7 @@ def validate_checkouts_and_fetch_branch_names(branch_release_times):
 
         # Save the Chrome branches for use by the rest of the function.
         if repository['name'] == 'chrome':
-            branch_names = recent_branches
+            branch_names = filtered_branches
     return branch_names
 
 
@@ -340,8 +347,14 @@ def fetch_command(args):
         branch_pairs = [(branch_names[index], branch_names[index + 1]) for index in range(branch_limit)]
 
     for branch, previous_branch in branch_pairs:
+        if not branch_release_times.get(branch):
+            log.error("No release date for %s, validate_checkouts_and_fetch_branch_names should have caught this??" % branch)
         for repository in REPOSITORIES:
             cache_path = csv_path(branch, repository)
+            # FIXME: Need more sophisticated validatation:
+            # Does the # of records match what git says?
+            # Do the headers match?
+            # Warn about files which exist but don't have a corresponding branch?
             if not args.force and os.path.exists(cache_path):
                 log.info("%s exists, assuming up to date, skipping." % cache_path)
                 continue
@@ -378,18 +391,51 @@ def seconds_between_keys(change, earlier_key, later_key):
         return 0
     seconds = int((later_date - earlier_date).total_seconds())
     if later_date < earlier_date:
-        log.debug("Time between %s and %s in %s is negative (%s), ignoring." % (earlier_key, later_key, change['commit_id'], seconds))
+        log.warn("Time between %s and %s in %s is negative (%s), ignoring." % (earlier_key, later_key, change['commit_id'], seconds))
         return 0
     return seconds
+
+
+# Maybe this should be a "date trust order"?
+def which_date_to_trust(before, after):
+    if 'commit_date' in (before, after):
+        return 'commit_date'
+    if 'first_lgtm_date' == before:
+        return after
+    log.debug("Unhandled: %s vs %s, trusting %s" % (before, after, before))
+    return before
+
+
+def filter_bad_dates(change):
+    change_copy = None
+    last_good_event = GRAPH_ORDERED_EVENTS[0]
+    for event_name in GRAPH_ORDERED_EVENTS[1:]:
+        date = change[event_name]
+        if not date:
+            continue
+        if date >= change[last_good_event]:
+            last_good_event = event_name
+            continue
+        # Unclear if we need this hackish Copy-on-write.
+        if not change_copy:
+            change_copy = change.copy()
+        trusted_event = which_date_to_trust(last_good_event, event_name)
+        untrusted_event = last_good_event if trusted_event == event_name else event_name 
+        log.info("%s unexpectedly before %s in %s, ignoring %s." % (event_name, last_good_event, change['commit_id'], untrusted_event))
+        change_copy[untrusted_event] = None
+        last_good_event = trusted_event
+    return change_copy if change_copy else change
 
 
 def print_stats(changes):
     from_key = 'review_sent_date'
     to_key = 'commit_date'
-    times = map(lambda change: seconds_between_keys(change, from_key, to_key), changes)
+    # filtered_changes = map(filter_bad_dates, changes)
+    filtered_changes = changes # filter_bad_dates doesn't work well enough yet.
+    times = map(lambda change: seconds_between_keys(change, from_key, to_key), filtered_changes)
     print "From: ", from_key
     print "To: ", to_key
-    print "Branches: ", " ".join(sorted(set(map(lambda change: change['branch'], changes))))
+    print "Branches: ", " ".join(sorted(set(map(lambda change: change['branch'], filtered_changes))))
     print "Commits: ", len(times)
     print "Mean:", datetime.timedelta(seconds=int(numpy.mean(times)))
     print "Precentiles:"
@@ -501,6 +547,7 @@ def graph_command(args):
         print "window.%s_stats = [" % repository
         print ['svn_revision'] + diff_names(ordered_events), ","
         json_lists = [_json_list(change_stats(change, ordered_events), change, ordered_events) for change in per_repo_changes]
+        # FIXME: It's possible that remove_outliers is removing records based on SVN revision.
         json_lists = remove_outliers(json_lists)
         # It's a bit odd to avg svn revisions, but whatever.
         avg_jsons = [map(int, list(numpy.mean(chunk, axis=0))) for chunk in chunks(json_lists, chunk_size)]
