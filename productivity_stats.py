@@ -206,49 +206,49 @@ def first_cq_start_date(review):
 
 
 def commit_times(commit_id, repository):
-    change = {
-        'commit_id': commit_id,
-    }
+    change = {}
     args = ['git', 'log', '-1', '--pretty=format:%ct%n%cn%n%b', commit_id]
     log_text = subprocess.check_output(args, cwd=repository['relative_path'])
 
     lines = log_text.split("\n")
     change['commit_date'] = datetime.datetime.utcfromtimestamp(int(lines.pop(0)))
     change['commit_author'] = lines.pop(0)
-
-    change['review_id'] = review_id_from_lines(lines)
-    # FIXME: Should probably filter during processing instead of fetching?
-    if not change['review_id']:
-        if change['commit_author'] not in NO_REVIEW_URL_AUTHORS:
-            log.debug("Skipping %s from %s no Review URL" %
-                (commit_id, change['commit_author']))
-        return None
-
-    review = fetch_review(change['review_id'])
-    if not review:
-        log.debug("Skipping %s, failed to fetch/parse review JSON." % commit_id)
-        return None
-    change['review_create_date'] = parse_datetime_ms(review["created"])
-    if review["messages"]:
-        change['review_sent_date'] = parse_datetime_ms(review["messages"][0]['date'])
-    else:
-        log.error('Review %s from %s has 0 messages??' % (change['review_id'], change['commit_id']))
-        change['review_sent_date'] = None 
-    change['first_lgtm_date'] = first_lgtm_date(review)
-    change['first_cq_start_date'] = first_cq_start_date(review)
     change['svn_revision'] = svn_revision_from_lines(lines, repository)
+    change['review_id'] = review_id_from_lines(lines)
     return change
 
 
+def review_times(review_id, commit_id):
+    change = {}
+    if not review_id:
+        return change
+    review = fetch_review(review_id)
+    if not review:
+        log.debug('Skipping %s, failed to fetch/parse review JSON.' % commit_id)
+        return change
+    change['review_create_date'] = parse_datetime_ms(review['created'])
+    if review['messages']:
+        change['review_sent_date'] = parse_datetime_ms(review['messages'][0]['date'])
+    else:
+        log.error('Review %s from %s has 0 messages??' % (review_id, commit_id))
+        change['review_sent_date'] = None 
+    change['first_lgtm_date'] = first_lgtm_date(review)
+    change['first_cq_start_date'] = first_cq_start_date(review)
+    return change
+
+
+default_fields = dict(zip(CSV_FIELD_ORDER, [None] * len(CSV_FIELD_ORDER)))
+
 def change_times(commit_id, branch, repository, branch_release_times):
-    change = commit_times(commit_id, repository)
-    if not change:
-        return None
+    change = default_fields.copy()
     change.update({
+        'commit_id': commit_id,
         'repository': repository['name'],
         'branch': branch,
         'branch_release_date': branch_release_times.get(branch),
     })
+    change.update(commit_times(commit_id, repository))
+    change.update(review_times(change['review_id'], commit_id))
     return change
 
 
@@ -351,22 +351,33 @@ def fetch_command(args):
             log.error("No release date for %s, validate_checkouts_and_fetch_branch_names should have caught this??" % branch)
         for repository in REPOSITORIES:
             cache_path = csv_path(branch, repository)
+            commits = commits_new_in_branch(branch, previous_branch, repository)
+
             # FIXME: Need more sophisticated validatation:
             # Does the # of records match what git says?
             # Do the headers match?
             # Warn about files which exist but don't have a corresponding branch?
             if not args.force and os.path.exists(cache_path):
-                log.info("%s exists, assuming up to date, skipping." % cache_path)
-                continue
+                filename = os.path.basename(cache_path)
+                records = read_csv(cache_path)
+                if records is None:
+                    log.warn("%s invalid, refetching." % filename)
+                elif len(records) != len(commits):
+                    log.warn('%s has wrong number of commits (got: %s expected %s), refetching.' % (filename, len(records), len(commits)))
+                else:
+                    sys.stderr.write('.')
+                    sys.stderr.flush()
+                    continue
+
             with open(cache_path, "w") as csv_file:
                 csv_file.write(",".join(CSV_FIELD_ORDER) + "\n")
-                commits = commits_new_in_branch(branch, previous_branch, repository)
                 log.info("%s commits between branch %s and %s in %s" %
                     (len(commits), branch, previous_branch, repository['name']))
                 for commit_id in commits:
                     change = change_times(commit_id, branch, repository, branch_release_times)
                     if change:
                         csv_file.write(csv_line(change, CSV_FIELD_ORDER) + "\n")
+    print # stderr has no newline after the '.' writes.
 
 
 def split_csv_line(csv_line):
@@ -379,7 +390,7 @@ def read_csv(file_path):
     if fields != CSV_FIELD_ORDER:
         log.error("CSV Field mismatch, got: %s, expected: %s" %
             (fields, CSV_FIELD_ORDER))
-        return 1
+        return None
 
     return [dict(map(_convert_dates, zip(CSV_FIELD_ORDER, split_csv_line(line)))) for line in csv_file]
 
@@ -470,9 +481,18 @@ def load_changes():
         #log.debug("%s changes in %s" % (len(records), path))
         sys.stderr.write('.')
         sys.stderr.flush()
-        changes.extend(records)
+        if records:
+            changes.extend(records)
     # FIXME: We may want to make filtering an explicit step?
-    return filter(lambda change: change['commit_author'] not in BOT_AUTHORS, changes)
+    no_bots = filter(lambda change: change['commit_author'] not in BOT_AUTHORS, changes)
+
+    # if not change['review_id']:
+    #     if change['commit_author'] not in NO_REVIEW_URL_AUTHORS:
+    #         log.debug('Skipping %s from %s no Review URL' %
+    #             (commit_id, change['commit_author']))
+    #     return None
+
+    return no_bots
 
 
 def stats_command(args):
@@ -620,4 +640,4 @@ def main(args):
 
 
 if __name__ == "__main__":
-    main(sys.argv[1:])
+    sys.exit(main(sys.argv[1:]))
