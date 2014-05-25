@@ -354,8 +354,6 @@ def fetch_command(args):
             commits = commits_new_in_branch(branch, previous_branch, repository)
 
             # FIXME: Need more sophisticated validatation:
-            # Does the # of records match what git says?
-            # Do the headers match?
             # Warn about files which exist but don't have a corresponding branch?
             if not args.force and os.path.exists(cache_path):
                 filename = os.path.basename(cache_path)
