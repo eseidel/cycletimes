@@ -472,16 +472,21 @@ def print_oneline_stats(changes, from_key, to_key):
     mean = datetime.timedelta(seconds=int(numpy.mean(times)))
     median = datetime.timedelta(seconds=int(numpy.median(times)))
     # Just mean and median.
-    print "%19s -> %19s median %15s, mean: %15s (ignored: %s of %s)" % (from_key, to_key, mean, median, len(unfiltered_times) - len(times), len(unfiltered_times))
+    filtered_count = len(unfiltered_times) - len(times)
+    filtered_percent = int(float(filtered_count) / len(times) * 100)
+    print "%19s -> %19s median %15s, mean: %15s, ignored: %s (%s%%)" % (from_key, to_key, mean, median, filtered_count, filtered_percent)
 
 
 def print_stats(changes):
     # filtered_changes = map(filter_bad_dates, changes)
     print "Branches: ", re_range(sorted(set(map(lambda change: int(change['branch']), changes))))
+    print "Commits: ", len(changes)
+    print "Dates: %s - %s" % (changes[0]['commit_date'], changes[-1]['commit_date'])
     # print_long_stats(changes, 'review_sent_date', 'commit_date')
     for from_key, to_key in window(GRAPH_ORDERED_EVENTS):
         print_oneline_stats(changes, from_key, to_key)
-    print "'ignored' means time <= 0, e.g. change committed before lgtm or CQ was tried before LGTM, etc."
+    print_oneline_stats(changes, GRAPH_ORDERED_EVENTS[0], GRAPH_ORDERED_EVENTS[-1])
+    print "'ignored' means an endpoint was missing or time <= 0 (e.g. change committed before lgtm or CQ was tried before LGTM, etc.)"
 
 
 def load_changes():
