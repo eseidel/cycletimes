@@ -480,8 +480,9 @@ def print_oneline_stats(changes, from_key, to_key):
 def print_stats(changes):
     # filtered_changes = map(filter_bad_dates, changes)
     print "Branches: ", re_range(sorted(set(map(lambda change: int(change['branch']), changes))))
-    print "Commits: ", len(changes)
     print "Dates: %s - %s" % (changes[0]['commit_date'], changes[-1]['commit_date'])
+    review_less = filter(lambda change: not change['review_id'], changes)
+    print "Commits: %s (%s w/o reviews)" % (len(changes), len(review_less))
     # print_long_stats(changes, 'review_sent_date', 'commit_date')
     for from_key, to_key in window(GRAPH_ORDERED_EVENTS):
         print_oneline_stats(changes, from_key, to_key)
