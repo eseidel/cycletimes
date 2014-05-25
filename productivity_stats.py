@@ -474,7 +474,7 @@ def print_oneline_stats(changes, from_key, to_key):
     # Just mean and median.
     filtered_count = len(unfiltered_times) - len(times)
     filtered_percent = int(float(filtered_count) / len(times) * 100)
-    print "%19s -> %19s median %15s, mean: %15s, ignored: %s (%s%%)" % (from_key, to_key, mean, median, filtered_count, filtered_percent)
+    print "%14s -> %14s  med: %16s, mean: %16s, ignored: %s (%s%%)" % (from_key[:-5], to_key[:-5], mean, median, filtered_count, filtered_percent)
 
 
 def print_stats(changes):
