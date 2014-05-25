@@ -24,15 +24,15 @@ import logging
 def setup_logging():
     logger = logging.getLogger(__name__)
     logger.setLevel(logging.DEBUG)
-    ch = logging.StreamHandler()
-    ch.setLevel(logging.DEBUG)
+    handler = logging.StreamHandler()
+    handler.setLevel(logging.DEBUG)
     formatter = logging.Formatter('%(levelname)s: %(message)s')
-    ch.setFormatter(formatter)
-    logger.addHandler(ch)
-    return logger
+    handler.setFormatter(formatter)
+    logger.addHandler(handler)
+    return logger, handler
 
 
-log = setup_logging()
+log, logging_handler = setup_logging()
 
 # TODO:
 # Verify that timezones are correct for all timestamps!
@@ -402,7 +402,7 @@ def seconds_between_keys(change, earlier_key, later_key):
     if later_date < earlier_date:
         # review_sent_date to commit_date is negative for all manual commits.
         if earlier_key != 'review_sent_date' or later_key != 'commit_date':
-            log.warn("Time between %s and %s in %s is negative (%s), ignoring." % (earlier_key, later_key, change['commit_id'], seconds))
+            log.info("Time between %s and %s in %s is negative (%s), ignoring." % (earlier_key, later_key, change['commit_id'], seconds))
         return 0
     return seconds
 
@@ -453,16 +453,10 @@ def re_range(lst):
          ranges.append(s)
     return ', '.join(ranges)
 
-
-def print_stats(changes):
-    from_key = 'review_sent_date'
-    to_key = 'commit_date'
-    # filtered_changes = map(filter_bad_dates, changes)
-    filtered_changes = changes # filter_bad_dates doesn't work well enough yet.
-    times = map(lambda change: seconds_between_keys(change, from_key, to_key), filtered_changes)
+def print_long_stats(changes, from_key, to_key):
     print "From: ", from_key
     print "To: ", to_key
-    print "Branches: ", re_range(sorted(set(map(lambda change: int(change['branch']), filtered_changes))))
+    times = map(lambda change: seconds_between_keys(change, from_key, to_key), changes)
     print "Commits: ", len(times)
     print "Mean:", datetime.timedelta(seconds=int(numpy.mean(times)))
     print "Precentiles:"
@@ -470,6 +464,24 @@ def print_stats(changes):
         seconds = numpy.percentile(times, percentile)
         time_delta = datetime.timedelta(seconds=int(seconds))
         print "%s%%: %s" % (percentile, time_delta)
+
+
+def print_oneline_stats(changes, from_key, to_key):
+    unfiltered_times = map(lambda change: seconds_between_keys(change, from_key, to_key), changes)
+    times = filter(lambda seconds: seconds > 0, unfiltered_times)
+    mean = datetime.timedelta(seconds=int(numpy.mean(times)))
+    median = datetime.timedelta(seconds=int(numpy.median(times)))
+    # Just mean and median.
+    print "%19s -> %19s median %15s, mean: %15s (ignored: %s of %s)" % (from_key, to_key, mean, median, len(unfiltered_times) - len(times), len(unfiltered_times))
+
+
+def print_stats(changes):
+    # filtered_changes = map(filter_bad_dates, changes)
+    print "Branches: ", re_range(sorted(set(map(lambda change: int(change['branch']), changes))))
+    # print_long_stats(changes, 'review_sent_date', 'commit_date')
+    for from_key, to_key in window(GRAPH_ORDERED_EVENTS):
+        print_oneline_stats(changes, from_key, to_key)
+    print "'ignored' means time <= 0, e.g. change committed before lgtm or CQ was tried before LGTM, etc."
 
 
 def load_changes():
@@ -483,6 +495,10 @@ def load_changes():
             changes.extend(records)
     # FIXME: We may want to make filtering an explicit step?
     no_bots = filter(lambda change: change['commit_author'] not in BOT_AUTHORS, changes)
+    for change in no_bots:
+        # LGTMs after commit are common, but can just be ignored for our stats.
+        if change['first_lgtm_date'] and change['first_lgtm_date'] > change['commit_date']:
+            change['first_lgtm_date'] = None
 
     # if not change['review_id']:
     #     if change['commit_author'] not in NO_REVIEW_URL_AUTHORS:
@@ -610,6 +626,7 @@ def debug_command(args):
 def main(args):
     parser = argparse.ArgumentParser()
     parser.add_argument('chrome_path')
+    parser.add_argument('--verbose', '-v', action='store_true')
     subparsers = parser.add_subparsers()
 
     fetch_parser = subparsers.add_parser('fetch')
@@ -630,6 +647,11 @@ def main(args):
     debug_parser.add_argument('commit_id')
 
     args = parser.parse_args(args)
+
+    global logging_handler
+    level = logging.DEBUG if args.verbose else logging.WARN
+    logging_handler.setLevel(level)
+
     # This script assume's its being run from the root of a chrome checkout
     # we could remove this restriction by fixing uses of the REPOSITORIES
     # relative_path key.
