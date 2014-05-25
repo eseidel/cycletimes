@@ -467,7 +467,9 @@ def load_changes():
     changes = []
     for path in glob.iglob(os.path.join(CACHE_LOCATION, '*.csv')):
         records = read_csv(path)
-        log.debug("%s changes in %s" % (len(records), path))
+        #log.debug("%s changes in %s" % (len(records), path))
+        sys.stderr.write('.')
+        sys.stderr.flush()
         changes.extend(records)
     # FIXME: We may want to make filtering an explicit step?
     return filter(lambda change: change['commit_author'] not in BOT_AUTHORS, changes)
