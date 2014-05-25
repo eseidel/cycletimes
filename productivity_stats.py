@@ -427,6 +427,22 @@ def filter_bad_dates(change):
     return change_copy if change_copy else change
 
 
+# http://stackoverflow.com/questions/9470611/how-to-do-an-inverse-range-i-e-create-a-compact-range-based-on-a-set-of-numb/9471386#9471386
+def re_range(lst):
+    def sub(x):
+        return x[1] - x[0]
+
+    ranges = []
+    for k, iterable in itertools.groupby(enumerate(sorted(lst)), sub):
+         rng = list(iterable)
+         if len(rng) == 1:
+             s = str(rng[0][1])
+         else:
+             s = "%s-%s" % (rng[0][1], rng[-1][1])
+         ranges.append(s)
+    return ', '.join(ranges)
+
+
 def print_stats(changes):
     from_key = 'review_sent_date'
     to_key = 'commit_date'
@@ -435,7 +451,7 @@ def print_stats(changes):
     times = map(lambda change: seconds_between_keys(change, from_key, to_key), filtered_changes)
     print "From: ", from_key
     print "To: ", to_key
-    print "Branches: ", " ".join(sorted(set(map(lambda change: change['branch'], filtered_changes))))
+    print "Branches: ", re_range(sorted(set(map(lambda change: int(change['branch']), filtered_changes))))
     print "Commits: ", len(times)
     print "Mean:", datetime.timedelta(seconds=int(numpy.mean(times)))
     print "Precentiles:"
