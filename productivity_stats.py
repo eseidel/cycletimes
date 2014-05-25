@@ -48,6 +48,7 @@ log, logging_handler = setup_logging()
 
 
 CACHE_LOCATION = 'productivity_stats_cache'
+CACHE_FILE_REGEXP = re.compile(r'(?P<branch>\d+)_(?P<repository>\w+)\.csv')
 
 # Default date format when stringifying python dates.
 PYTHON_DATE_FORMAT_MS = "%Y-%m-%d %H:%M:%S.%f"
@@ -65,11 +66,25 @@ CSV_FIELD_ORDER = [
     'review_create_date',
     'review_sent_date',
     'first_lgtm_date',
+    'last_lgtm_date',
     'first_cq_start_date',
+    'last_cq_start_date',
     'commit_date',
     'branch_release_date',
 ]
 
+ALL_ORDERED_EVENTS = [
+    'review_create_date',
+    'review_sent_date',
+    'first_lgtm_date',
+    'last_lgtm_date',
+    'first_cq_start_date',
+    'last_cq_start_date',
+    'commit_date',
+    'branch_release_date',
+]
+
+# Only the events to show in the graph command.
 GRAPH_ORDERED_EVENTS = [
     'review_create_date',
     'review_sent_date',
@@ -191,14 +206,14 @@ def fetch_review(review_id):
             log.error("Unknown error parsing %s (%s)" % (review_url, e))
 
 
-def first_lgtm_date(review):
-    for message in review['messages']:
+def first_lgtm_date(messages):
+    for message in messages:
         if message['approval']:
             return parse_datetime_ms(message['date'])
 
 
-def first_cq_start_date(review):
-    for message in review['messages']:
+def first_cq_start_date(messages):
+    for message in messages:
         # We could also look for "The CQ bit was checked by" instead
         # but I'm not sure how long rietveld has been adding that.
         if message['text'].startswith("CQ is trying da patch."):
@@ -232,8 +247,10 @@ def review_times(review_id, commit_id):
     else:
         log.error('Review %s from %s has 0 messages??' % (review_id, commit_id))
         change['review_sent_date'] = None 
-    change['first_lgtm_date'] = first_lgtm_date(review)
-    change['first_cq_start_date'] = first_cq_start_date(review)
+    change['first_lgtm_date'] = first_lgtm_date(review['messages'])
+    change['last_lgtm_date'] = first_lgtm_date(reversed(review['messages']))
+    change['first_cq_start_date'] = first_cq_start_date(review['messages'])
+    change['last_cq_start_date'] = first_cq_start_date(reversed(review['messages']))
     return change
 
 
@@ -308,7 +325,7 @@ def check_for_stale_checkout(repository, branch_names, branch_release_times):
 
 
 def csv_path(branch, repository):
-    return os.path.join(CACHE_LOCATION, "%s_%s.csv" % (branch, repository['name']))
+    return os.path.join(CACHE_LOCATION, '%s_%s.csv' % (branch, repository['name']))
 
 
 def validate_checkouts_and_fetch_branch_names(branch_release_times):
@@ -331,24 +348,60 @@ def validate_checkouts_and_fetch_branch_names(branch_release_times):
     return branch_names
 
 
-def fetch_command(args):
+def load_cached_branches(args, branch_release_times):
+    cache_paths = glob.glob(os.path.join(CACHE_LOCATION, '*.csv'))
+    cached_branches = set()
+    for cache_path in cache_paths:
+        name = os.path.basename(cache_path)
+        match = CACHE_FILE_REGEXP.match(name)
+        if not match:
+            log.warn('%s does not match cache pattern, ignoring.' % cache_path)
+        else:
+            branch = match.group('branch')
+            if not branch_release_times.get(branch):
+                if args.prune:
+                    log.info('cached branch %s (from %s) is not in released branches, removing.' % (branch, cache_path))
+                    os.unlink(cache_path)
+                    continue
+                else:
+                    log.warn('cached branch %s (from %s) is not in released branches! (pass --prune to remove)' % (branch, cache_path))
+            cached_branches.add(branch)
+    log.info("%s files for %s branches in cache." % (len(cache_paths), len(cached_branches)))
+    return cached_branches
+
+
+def update_command(args):
     branch_release_times = fetch_branch_release_times()
     branch_names = validate_checkouts_and_fetch_branch_names(branch_release_times)
+    # FIXME: Instead of updating all branches we happen to have cached
+    # it might make more sense to take a --since-branch argument and fetch/update
+    # all branches since that one.
+    cached_branches = load_cached_branches(args, branch_release_times)
 
     branch_limit = min(len(branch_names) - 1, args.branch_limit)
+    cache_hits = 0
 
     if not os.path.exists(CACHE_LOCATION):
+        print "Empty cache, creating: %s" % CACHE_LOCATION
         os.makedirs(CACHE_LOCATION)
 
-    if args.branch:
-        index = branch_names.index(args.branch)
-        branch_pairs = [(branch_names[index], branch_names[index + 1])]
-    else:
-        branch_pairs = [(branch_names[index], branch_names[index + 1]) for index in range(branch_limit)]
+    branches = set()
 
-    for branch, previous_branch in branch_pairs:
+    if args.branch:
+        branches.add(args.branch)
+    else:
+        branches.update(branch_names[:branch_limit])
+        branches.update(cached_branches)
+
+    # Note: This depends on using integer branch names which may break.
+    for branch in sorted(branches, key=int, reverse=True):
         if not branch_release_times.get(branch):
             log.error("No release date for %s, validate_checkouts_and_fetch_branch_names should have caught this??" % branch)
+            continue
+
+        branch_index = branch_names.index(branch)
+        previous_branch = branch_names[branch_index + 1] if branch_index < len(branch_names) else None
+
         for repository in REPOSITORIES:
             cache_path = csv_path(branch, repository)
             commits = commits_new_in_branch(branch, previous_branch, repository)
@@ -365,6 +418,7 @@ def fetch_command(args):
                 else:
                     sys.stderr.write('.')
                     sys.stderr.flush()
+                    cache_hits += 1
                     continue
 
             with open(cache_path, "w") as csv_file:
@@ -375,7 +429,7 @@ def fetch_command(args):
                     change = change_times(commit_id, branch, repository, branch_release_times)
                     if change:
                         csv_file.write(csv_line(change, CSV_FIELD_ORDER) + "\n")
-    print # stderr has no newline after the '.' writes.
+    print "\nChecked %s branches, %s were already in cache." % (len(branches) * len(REPOSITORIES), cache_hits)
 
 
 def split_csv_line(csv_line):
@@ -484,9 +538,11 @@ def print_stats(changes):
     review_less = filter(lambda change: not change['review_id'], changes)
     print "Commits: %s (%s w/o reviews)" % (len(changes), len(review_less))
     # print_long_stats(changes, 'review_sent_date', 'commit_date')
-    for from_key, to_key in window(GRAPH_ORDERED_EVENTS):
+    for from_key, to_key in window(ALL_ORDERED_EVENTS):
         print_oneline_stats(changes, from_key, to_key)
-    print_oneline_stats(changes, GRAPH_ORDERED_EVENTS[0], GRAPH_ORDERED_EVENTS[-1])
+    print_oneline_stats(changes, 'review_sent_date', 'commit_date')
+    print_oneline_stats(changes, 'first_cq_start_date', 'commit_date')
+    print_oneline_stats(changes, ALL_ORDERED_EVENTS[0], ALL_ORDERED_EVENTS[-1])
     print "'ignored' means an endpoint was missing or time <= 0 (e.g. change committed before lgtm or CQ was tried before LGTM, etc.)"
 
 
@@ -635,11 +691,12 @@ def main(args):
     parser.add_argument('--verbose', '-v', action='store_true')
     subparsers = parser.add_subparsers()
 
-    fetch_parser = subparsers.add_parser('fetch')
-    fetch_parser.add_argument('--force', action='store_true')
-    fetch_parser.add_argument('--branch-limit', default=20)
-    fetch_parser.add_argument('--branch', action='store')
-    fetch_parser.set_defaults(func=fetch_command)
+    update_parser = subparsers.add_parser('update')
+    update_parser.add_argument('--force', action='store_true')
+    update_parser.add_argument('--branch-limit', default=20)
+    update_parser.add_argument('--branch', action='store')
+    update_parser.add_argument('--prune', action='store_true')
+    update_parser.set_defaults(func=update_command)
 
     stats_parser = subparsers.add_parser('stats')
     stats_parser.set_defaults(func=stats_command)
