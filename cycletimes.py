@@ -120,7 +120,18 @@ REPOSITORIES = [
         'relative_path': 'third_party/WebKit',
         'svn_url': 'svn://svn.chromium.org/blink/trunk',
         'branch_heads': 'refs/remotes/branch-heads/chromium'
-    }
+    },
+    # Skia's branches don't seem to follow the expected pattern:
+    # https://code.google.com/p/skia/source/browse/#svn%2Fbranches%2Fchrome
+    # {
+    #     'name': 'skia',
+    #     'relative_path': 'third_party/skia/src',
+    #     'svn_url': 'http://skia.googlecode.com/svn/trunk/src',
+    #     'branch_heads': 'refs/remotes/branch-heads/chrome'
+    # },
+    # V8 also has its own branch pattern (they have separate releases)
+    # but we could use the DEPS files for chrome for both Skia and V8
+    # https://code.google.com/p/v8/source/browse#svn%2Fbranches
 ]
 
 # For matching git commit messages:
