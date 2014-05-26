@@ -14,9 +14,6 @@ import subprocess
 import sys
 import os
 
-# CAREFUL: This caches everything, including omaha proxy lookups!
-requests_cache.install_cache('productivity_stats')
-
 
 import logging
 
@@ -46,8 +43,7 @@ log, logging_handler = setup_logging()
 # Want a breakdown of what the median time spent in each phase is.
 # To answer the question of what phases do we need to make faster.
 
-
-CACHE_LOCATION = 'productivity_stats_cache'
+CACHE_NAME = 'cycletimes_cache'
 CACHE_FILE_REGEXP = re.compile(r'(?P<branch>\d+)_(?P<repository>\w+)\.csv')
 
 # Default date format when stringifying python dates.
@@ -332,7 +328,7 @@ def check_for_stale_checkout(repository, branch_names, branch_release_times):
 
 
 def csv_path(branch, repository):
-    return os.path.join(CACHE_LOCATION, '%s_%s.csv' % (branch, repository['name']))
+    return os.path.join(CACHE_NAME, '%s_%s.csv' % (branch, repository['name']))
 
 
 def validate_checkouts_and_fetch_branch_names(branch_release_times):
@@ -356,7 +352,7 @@ def validate_checkouts_and_fetch_branch_names(branch_release_times):
 
 
 def load_cached_branches(args, branch_release_times):
-    cache_paths = glob.glob(os.path.join(CACHE_LOCATION, '*.csv'))
+    cache_paths = glob.glob(os.path.join(CACHE_NAME, '*.csv'))
     cached_branches = set()
     for cache_path in cache_paths:
         name = os.path.basename(cache_path)
@@ -388,9 +384,9 @@ def update_command(args):
     branch_limit = min(len(branch_names) - 1, args.branch_limit)
     cache_hits = 0
 
-    if not os.path.exists(CACHE_LOCATION):
-        print "Empty cache, creating: %s" % CACHE_LOCATION
-        os.makedirs(CACHE_LOCATION)
+    if not os.path.exists(CACHE_NAME):
+        print "Empty cache, creating: %s" % CACHE_NAME
+        os.makedirs(CACHE_NAME)
 
     branches = set()
 
@@ -555,7 +551,7 @@ def print_stats(changes):
 
 def load_changes():
     changes = []
-    for path in glob.iglob(os.path.join(CACHE_LOCATION, '*.csv')):
+    for path in glob.iglob(os.path.join(CACHE_NAME, '*.csv')):
         records = read_csv(path)
         #log.debug("%s changes in %s" % (len(records), path))
         sys.stderr.write('.')
@@ -693,6 +689,9 @@ def debug_command(args):
 
 
 def main(args):
+    # CAREFUL: This caches everything, including omaha proxy lookups!
+    requests_cache.install_cache(CACHE_NAME)
+
     parser = argparse.ArgumentParser()
     parser.add_argument('chrome_path')
     parser.add_argument('--verbose', '-v', action='store_true')
