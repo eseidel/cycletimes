@@ -117,13 +117,13 @@ REPOSITORIES = [
         'name': 'chrome',
         'relative_path': '.',
         'svn_url': 'svn://svn.chromium.org/chrome/trunk/src',
-        'branch_heads': 'refs/remotes/branch-heads'
+        'branch_heads': 'refs/remotes/branch-heads',
     },
     {
         'name': 'blink',
         'relative_path': 'third_party/WebKit',
         'svn_url': 'svn://svn.chromium.org/blink/trunk',
-        'branch_heads': 'refs/remotes/branch-heads/chromium'
+        'branch_heads': 'refs/remotes/branch-heads/chromium',
     },
     # Skia's branches don't seem to follow the expected pattern:
     # https://code.google.com/p/skia/source/browse/#svn%2Fbranches%2Fchrome
