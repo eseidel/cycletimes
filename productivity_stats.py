@@ -196,12 +196,19 @@ def svn_revision_from_lines(lines, repository):
 
 def fetch_review(review_id):
     review_url = "%s/api/%s?messages=true" % (RIETVELD_URL, review_id)
-    response = requests.get(review_url)
+    try:
+        response = requests.get(review_url, timeout=10)
+        if not getattr(response, 'from_cache', False):
+            log.debug("Hit network: %s" % review_url)
+    except requests.exceptions.Timeout, requests.exceptions.SSLError:
+        log.error('Timeout fetching %s' % review_url)
+        return None
+
     try:
         return response.json()
     except ValueError, e:
         if "Sign in" in response.text:
-            log.error("%s is restricted" % review_url)
+            log.warn("%s is restricted" % review_url)
         else:
             log.error("Unknown error parsing %s (%s)" % (review_url, e))
 
@@ -447,13 +454,13 @@ def read_csv(file_path):
     return [dict(map(_convert_dates, zip(CSV_FIELD_ORDER, split_csv_line(line)))) for line in csv_file]
 
 
-def seconds_between_keys(change, earlier_key, later_key):
+def seconds_between_keys(change, earlier_key, later_key, clamp_values=True):
     earlier_date = change[earlier_key]
     later_date = change[later_key]
     if earlier_date is None or later_date is None:
         return 0
     seconds = int((later_date - earlier_date).total_seconds())
-    if later_date < earlier_date:
+    if clamp_values and later_date < earlier_date:
         # review_sent_date to commit_date is negative for all manual commits.
         if earlier_key != 'review_sent_date' or later_key != 'commit_date':
             log.info("Time between %s and %s in %s is negative (%s), ignoring." % (earlier_key, later_key, change['commit_id'], seconds))
@@ -521,8 +528,8 @@ def print_long_stats(changes, from_key, to_key):
 
 
 def print_oneline_stats(changes, from_key, to_key):
-    unfiltered_times = map(lambda change: seconds_between_keys(change, from_key, to_key), changes)
-    times = filter(lambda seconds: seconds > 0, unfiltered_times)
+    unfiltered_times = map(lambda change: seconds_between_keys(change, from_key, to_key, clamp_values=False), changes)
+    times = filter(lambda seconds: seconds >= 0, unfiltered_times)
     mean = datetime.timedelta(seconds=int(numpy.mean(times)))
     median = datetime.timedelta(seconds=int(numpy.median(times)))
     # Just mean and median.
@@ -543,7 +550,7 @@ def print_stats(changes):
     print_oneline_stats(changes, 'review_sent_date', 'commit_date')
     print_oneline_stats(changes, 'first_cq_start_date', 'commit_date')
     print_oneline_stats(changes, ALL_ORDERED_EVENTS[0], ALL_ORDERED_EVENTS[-1])
-    print "'ignored' means an endpoint was missing or time <= 0 (e.g. change committed before lgtm or CQ was tried before LGTM, etc.)"
+    print "'ignored' means an endpoint was missing (e.g. TBR= change) or time < 0 (e.g. CQ was tried before LGTM)"
 
 
 def load_changes():
