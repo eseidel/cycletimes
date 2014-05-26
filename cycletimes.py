@@ -543,8 +543,11 @@ def print_stats(changes):
     # print_long_stats(changes, 'review_sent_date', 'commit_date')
     for from_key, to_key in window(ALL_ORDERED_EVENTS):
         print_oneline_stats(changes, from_key, to_key)
+
     print_oneline_stats(changes, 'review_sent_date', 'commit_date')
+    print_oneline_stats(changes, 'last_lgtm_date', 'commit_date')
     print_oneline_stats(changes, 'first_cq_start_date', 'commit_date')
+    print_oneline_stats(changes, 'last_cq_start_date', 'commit_date')
     print_oneline_stats(changes, ALL_ORDERED_EVENTS[0], ALL_ORDERED_EVENTS[-1])
     print "'ignored' means an endpoint was missing (e.g. TBR= change) or time < 0 (e.g. CQ was tried before LGTM)"
 
