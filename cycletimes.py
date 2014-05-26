@@ -207,7 +207,7 @@ def fetch_review(review_id):
         response = requests.get(review_url, timeout=10)
         if not getattr(response, 'from_cache', False):
             log.debug("Hit network: %s" % review_url)
-    except requests.exceptions.Timeout, requests.exceptions.SSLError:
+    except (requests.exceptions.Timeout, requests.exceptions.SSLError) as e:
         log.error('Timeout fetching %s' % review_url)
         return None
 
@@ -392,7 +392,7 @@ def update_command(args):
     # all branches since that one.
     cached_branches = load_cached_branches(args, branch_release_times)
 
-    branch_limit = min(len(branch_names) - 1, args.branch_limit)
+    branch_count = min(len(branch_names) - 1, args.branch_count)
     cache_hits = 0
 
     if not os.path.exists(CACHE_NAME):
@@ -404,7 +404,7 @@ def update_command(args):
     if args.branch:
         branches.add(args.branch)
     else:
-        branches.update(branch_names[:branch_limit])
+        branches.update(branch_names[:branch_count])
         branches.update(cached_branches)
 
     # Note: This depends on using integer branch names which may break.
@@ -590,6 +590,11 @@ def load_changes():
 
 def stats_command(args):
     changes = load_changes()
+    if args.branch_limit:
+        branches = set(map(operator.itemgetter('branch'), changes))
+        most_recent_branches = set(sorted(branches, key=int, reverse=True)[:int(args.branch_limit)])
+        changes = filter(lambda change: change['branch'] in most_recent_branches, changes)
+
     changes.sort(key=operator.itemgetter('repository', 'svn_revision'))
     for repository, per_repo_changes in itertools.groupby(changes, key=operator.itemgetter('repository')):
         print "\nRepository: %s" % repository
@@ -714,13 +719,14 @@ def main(args):
 
     update_parser = subparsers.add_parser('update')
     update_parser.add_argument('--force', action='store_true')
-    update_parser.add_argument('--branch-limit', default=20)
+    update_parser.add_argument('--branch-count', default=20, type=int)
     update_parser.add_argument('--branch', action='store')
     update_parser.add_argument('--prune', action='store_true')
     update_parser.set_defaults(func=update_command)
 
     stats_parser = subparsers.add_parser('stats')
     stats_parser.set_defaults(func=stats_command)
+    stats_parser.add_argument('--branch-limit', default=None, type=int)
 
     graph_parser = subparsers.add_parser('graph')
     graph_parser.set_defaults(func=graph_command)
