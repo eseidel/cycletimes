@@ -34,14 +34,16 @@ log, logging_handler = setup_logging()
 # TODO:
 # Verify that timezones are correct for all timestamps!
 # (Timezones can mean hours, which is a lot of time!)
-# Blink Rolls
+# Blink Rolls - list DEPS, grab webkit_revs and commit_date.
+# Could build a list of date -> rev and filter out any rollouts?
 # Reverts
 # Could show what % of time was due to tree-closures by overlapping lgtm -> commit time with tree closure data?
 # Could show what % of tiem was due to CQ by overlapping CQ data with lgtm -> commit time.
 # Want to show what % of a typical patch time is spent waiting for X.
 
-# Want a breakdown of what the median time spent in each phase is.
-# To answer the question of what phases do we need to make faster.
+# Should be possile to do skia by grabbing the DEPS from the branch
+# and using that to get Skia revisions.
+
 
 CACHE_NAME = 'cycletimes_cache'
 CACHE_FILE_REGEXP = re.compile(r'(?P<branch>\d+)_(?P<repository>\w+)\.csv')
@@ -61,8 +63,10 @@ CSV_FIELD_ORDER = [
     'branch',
     'review_create_date',
     'review_sent_date',
+    'lgtms',
     'first_lgtm_date',
     'last_lgtm_date',
+    'cq_starts',
     'first_cq_start_date',
     'last_cq_start_date',
     'commit_date',
@@ -220,20 +224,6 @@ def fetch_review(review_id):
             log.error("Unknown error parsing %s (%s)" % (review_url, e))
 
 
-def first_lgtm_date(messages):
-    for message in messages:
-        if message['approval']:
-            return parse_datetime_ms(message['date'])
-
-
-def first_cq_start_date(messages):
-    for message in messages:
-        # We could also look for "The CQ bit was checked by" instead
-        # but I'm not sure how long rietveld has been adding that.
-        if message['text'].startswith("CQ is trying da patch."):
-            return parse_datetime_ms(message['date'])
-
-
 def commit_times(commit_id, repository):
     change = {}
     args = ['git', 'log', '-1', '--pretty=format:%ct%n%cn%n%b', commit_id]
@@ -256,15 +246,24 @@ def review_times(review_id, commit_id):
         log.debug('Skipping %s, failed to fetch/parse review JSON.' % commit_id)
         return change
     change['review_create_date'] = parse_datetime_ms(review['created'])
-    if review['messages']:
-        change['review_sent_date'] = parse_datetime_ms(review['messages'][0]['date'])
-    else:
+
+    messages = review['messages']
+    if not messages:
         log.error('Review %s from %s has 0 messages??' % (review_id, commit_id))
-        change['review_sent_date'] = None 
-    change['first_lgtm_date'] = first_lgtm_date(review['messages'])
-    change['last_lgtm_date'] = first_lgtm_date(reversed(review['messages']))
-    change['first_cq_start_date'] = first_cq_start_date(review['messages'])
-    change['last_cq_start_date'] = first_cq_start_date(reversed(review['messages']))
+
+    change['review_sent_date'] = parse_datetime_ms(messages[0]['date']) if messages else None
+
+    lgtms = [parse_datetime_ms(m['date']) for m in messages if m['approval']]
+    change['lgtms'] = len(lgtms)
+    change['first_lgtm_date'] = lgtms[0] if lgtms else None
+    change['last_lgtm_date'] = lgtms[-1] if lgtms else None
+
+    # We could also look for "The CQ bit was checked by" instead
+    # but I'm not sure how long rietveld has been adding that.
+    cq_starts = [parse_datetime_ms(m['date']) for m in messages if m['text'].startswith('CQ is trying da patch.')]
+    change['cq_starts'] = len(cq_starts)
+    change['first_cq_start_date'] = cq_starts[0] if cq_starts else None
+    change['last_cq_start_date'] = cq_starts[-1] if cq_starts else None
     return change
 
 
@@ -384,6 +383,20 @@ def load_cached_branches(args, branch_release_times):
     return cached_branches
 
 
+def skia_revision_for(branch):
+    args = [
+        'git',
+        'show',
+        'refs/remotes/branch-heads/%s:DEPS' % branch,
+    ]
+    deps = subprocess.check_output(args)
+    skia_regexp = re.compile(r'\s*"skia_hash": "(?P<hash>\w+)",')
+    for line in deps.split('\n'):
+        match = skia_regexp.match(line)
+        if match:
+            return match.group('hash')
+
+
 def update_command(args):
     branch_release_times = fetch_branch_release_times()
     branch_names = validate_checkouts_and_fetch_branch_names(branch_release_times)
@@ -413,6 +426,8 @@ def update_command(args):
             log.error("No release date for %s, validate_checkouts_and_fetch_branch_names should have caught this??" % branch)
             continue
 
+        # print skia_revision_for(branch)
+
         branch_index = branch_names.index(branch)
         previous_branch = branch_names[branch_index + 1] if branch_index < len(branch_names) else None
 
@@ -426,7 +441,9 @@ def update_command(args):
                 filename = os.path.basename(cache_path)
                 records = read_csv(cache_path)
                 if records is None:
-                    log.warn("%s invalid, refetching." % filename)
+                    log.debug("%s invalid, refetching." % filename)
+                    sys.stderr.write('R')
+                    sys.stderr.flush()
                 elif len(records) != len(commits):
                     log.warn('%s has wrong number of commits (got: %s expected %s), refetching.' % (filename, len(records), len(commits)))
                 else:
@@ -454,7 +471,7 @@ def read_csv(file_path):
     csv_file = open(file_path)
     fields = split_csv_line(csv_file.readline())
     if fields != CSV_FIELD_ORDER:
-        log.error("CSV Field mismatch, got: %s, expected: %s" %
+        log.debug("CSV Field mismatch, got: %s, expected: %s" %
             (fields, CSV_FIELD_ORDER))
         return None
 
@@ -465,7 +482,7 @@ def seconds_between_keys(change, earlier_key, later_key, clamp_values=True):
     earlier_date = change[earlier_key]
     later_date = change[later_key]
     if earlier_date is None or later_date is None:
-        return 0
+        return 0 if clamp_values else None
     seconds = int((later_date - earlier_date).total_seconds())
     if clamp_values and later_date < earlier_date:
         # review_sent_date to commit_date is negative for all manual commits.
@@ -542,7 +559,12 @@ def print_oneline_stats(changes, from_key, to_key):
     # Just mean and median.
     filtered_count = len(unfiltered_times) - len(times)
     filtered_percent = int(float(filtered_count) / len(times) * 100)
-    print "%14s -> %14s  med: %16s, mean: %16s, ignored: %s (%s%%)" % (from_key[:-5], to_key[:-5], median, mean, filtered_count, filtered_percent)
+    print "%14s -> %14s %16s %16s  %s (%s%%)" % (from_key[:-5], to_key[:-5], median, mean, filtered_count, filtered_percent)
+
+
+def _int_values(changes, value_name):
+    values = map(operator.itemgetter(value_name), changes)
+    return [int(value) for value in values if value is not None]
 
 
 def print_stats(changes):
@@ -552,6 +574,12 @@ def print_stats(changes):
     review_less = filter(lambda change: not change['review_id'], changes)
     print "Commits: %s (%s w/o reviews)" % (len(changes), len(review_less))
     # print_long_stats(changes, 'review_sent_date', 'commit_date')
+    lgtms = _int_values(changes, 'lgtms')
+    print "LGTMs (in %s): mean: %.2f median: %s" % (len(lgtms), numpy.mean(lgtms), numpy.median(lgtms))
+    cq_starts = _int_values(changes, 'cq_starts')
+    print "CQ Starts (in %s): mean: %.2f median: %s" % (len(cq_starts), numpy.mean(cq_starts), numpy.median(cq_starts))
+
+    print "%14s -> %14s %16s %16s  %s" % ('from', 'to', 'median', 'mean', 'ignored')
     for from_key, to_key in window(ALL_ORDERED_EVENTS):
         print_oneline_stats(changes, from_key, to_key)
 
