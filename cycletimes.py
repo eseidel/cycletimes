@@ -615,6 +615,7 @@ def change_stats(change, ordered_events):
             previous_date = change[previous_name]
 
         if not previous_date:
+            results[event_name] = 0
             continue
 
         seconds = (date - previous_date).total_seconds()
