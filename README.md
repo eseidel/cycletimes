@@ -18,4 +18,4 @@ and dumps per-repository stats to stdout.
 Reads cached files from /chromepath/cycletimes_cache
 and dumps js to stdout for use with graph.html
 
-`cycletimes.py /chromepath graph1
+`cycletimes.py /chromepath graph`
