@@ -7,6 +7,7 @@ import collections
 import numpy
 import sys
 import os
+import argparse
 
 
 # FIXME: These could be shared with cycletimes.py
@@ -51,14 +52,16 @@ def _tuple_from_line(line):
     return (date, author)
 
 
-def _tuples_for_respository(repository):
-    args = [
+def _tuples_for_respository(repository, args):
+    git_args = [
         'git',
         'log',
         '--pretty=format:%ct###%an',
     ]
+    if args.since:
+        git_args.extend(['--since=%s' % args.since])
     directory = os.path.join(ROOT, repository['relative_path'])
-    log_text = subprocess.check_output(args, cwd=directory)
+    log_text = subprocess.check_output(git_args, cwd=directory)
     return [_tuple_from_line(line) for line in log_text.split('\n')]
 
 
@@ -75,10 +78,14 @@ def _stats_from_tuples(month, tuples):
 
 
 def main(args):
+    parser = argparse.ArgumentParser()
+    parser.add_argument('--since')
+    args = parser.parse_args(args)
+
     for repository in REPOSITORIES:
         print 
         print repository['name']
-        tuples = _tuples_for_respository(repository)
+        tuples = _tuples_for_respository(repository, args)
         print ' '.join(['month   ', 'com', 'con', 'avg', 'med', '90%'])
         for month, values in itertools.groupby(tuples, key=lambda date_and_author: date_and_author[0].month):
             stats = _stats_from_tuples(month, list(values))
