@@ -11,7 +11,6 @@ import argparse
 
 
 # FIXME: These could be shared with cycletimes.py
-ROOT = '/src/chromium/src'
 REPOSITORIES = [
     {
         'name': 'chrome',
@@ -60,7 +59,7 @@ def _tuples_for_respository(repository, args):
     ]
     if args.since:
         git_args.extend(['--since=%s' % args.since])
-    directory = os.path.join(ROOT, repository['relative_path'])
+    directory = os.path.join(args.chrome_path, repository['relative_path'])
     log_text = subprocess.check_output(git_args, cwd=directory)
     return [_tuple_from_line(line) for line in log_text.split('\n')]
 
@@ -79,6 +78,7 @@ def _stats_from_tuples(month, tuples):
 
 def main(args):
     parser = argparse.ArgumentParser()
+    parser.add_argument('chrome_path')
     parser.add_argument('--since')
     args = parser.parse_args(args)
 
