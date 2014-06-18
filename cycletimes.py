@@ -167,7 +167,9 @@ def fetch_branch_release_times():
     # Always grab the most recent release history.
     with requests_cache.disabled():
         history_text = requests.get(RELEASE_HISTORY_CSV_URL).text
-    for line in history_text.strip('\n').split('\n'):
+    lines = history_text.strip('\n').split('\n')
+    assert(lines[0] == 'os,channel,version,timestamp')
+    for line in lines[1:]:
         os, channel, version, date_string = line.split(',')
         date = parse_datetime_ms(date_string)
         branch = version.split('.')[2]
