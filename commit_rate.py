@@ -76,12 +76,7 @@ def _stats_from_tuples(month, tuples):
     return stats
 
 
-def main(args):
-    parser = argparse.ArgumentParser()
-    parser.add_argument('chrome_path')
-    parser.add_argument('--since')
-    args = parser.parse_args(args)
-
+def stats_command(args):
     for repository in REPOSITORIES:
         print 
         print repository['name']
@@ -90,6 +85,39 @@ def main(args):
         for month, values in itertools.groupby(tuples, key=lambda date_and_author: date_and_author[0].month):
             stats = _stats_from_tuples(month, list(values))
             print ' '.join(map(str, map(lambda name: stats[name], FIELD_ORDER)))
+
+
+def _to_string(value):
+    if isinstance(value, str):
+        return '\'%s\'' % value
+    return str(value)
+
+
+def graph_command(args):
+    print 'window.repositories = [%s]' % ','.join(map(_to_string, map(lambda repo: repo['name'], REPOSITORIES)))
+    for repository in REPOSITORIES:
+        print "window.%s_stats = [" % repository['name']
+        print ','.join(FIELD_ORDER) + ','
+        tuples = _tuples_for_respository(repository, args)
+        for month, values in itertools.groupby(tuples, key=lambda date_and_author: date_and_author[0].month):
+            stats = _stats_from_tuples(month, list(values))
+            print ','.join(map(_to_string, map(lambda name: stats[name], FIELD_ORDER)))
+        print "];"
+
+
+def main(args):
+    parser = argparse.ArgumentParser()
+    parser.add_argument('chrome_path')
+    parser.add_argument('--since')
+    subparsers = parser.add_subparsers()
+
+    stats_parser = subparsers.add_parser('stats')
+    stats_parser.set_defaults(func=stats_command)
+
+    graph_parser = subparsers.add_parser('graph')
+    graph_parser.set_defaults(func=graph_command)
+    args = parser.parse_args(args)
+    return args.func(args)
 
 
 if __name__ == "__main__":
