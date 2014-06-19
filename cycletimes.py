@@ -611,15 +611,41 @@ def print_stats(changes):
     print "'ignored' means an endpoint was missing (e.g. TBR= change) or time < 0 (e.g. CQ was tried before LGTM)"
 
 
-def load_changes():
+def load_changes(repository=None, branch_limit=None, show_progress=True):
     changes = []
-    for path in glob.iglob(os.path.join(CACHE_NAME, '*.csv')):
+    pattern = '*.csv'
+    if repository:
+        pattern = '*_%s.csv' % repository
+
+    paths = glob.glob(os.path.join(CACHE_NAME, pattern))
+    stray_files = [path for path in paths if not CACHE_FILE_REGEXP.match(os.path.basename(path))]
+    if stray_files:
+        log.warn("Stray files in cache: %s" % stray_files)
+
+    # FIXME: This is probably the least efficent way possible to implement this:
+    if branch_limit:
+        def branch_for(path):
+            match = CACHE_FILE_REGEXP.match(os.path.basename(path))
+            if not match:
+                return None
+            return int(match.group('branch'))
+        branches = filter(None, map(branch_for, paths))
+        branches = sorted(set(branches)) # Remove duplicates
+        most_recent_branches = sorted(branches, key=int, reverse=True)[:int(branch_limit)]
+        paths = filter(lambda path: branch_for(path) in most_recent_branches, paths)
+
+    for path in paths:
         records = read_csv(path, CSV_FIELD_ORDER)
-        #log.debug("%s changes in %s" % (len(records), path))
-        sys.stderr.write('.')
-        sys.stderr.flush()
+        if show_progress:
+            #log.debug("%s changes in %s" % (len(records), path))
+            sys.stderr.write('.')
+            sys.stderr.flush()
         if records:
             changes.extend(records)
+    return changes
+
+
+def filter_bad_changes(changes):
     # FIXME: We may want to make filtering an explicit step?
     no_bots = filter(lambda change: change['commit_author'] not in BOT_AUTHORS, changes)
     for change in no_bots:
@@ -632,37 +658,33 @@ def load_changes():
     #         log.debug('Skipping %s from %s no Review URL' %
     #             (commit_id, change['commit_author']))
     #     return None
-
     return no_bots
 
 
-def stats_command(args):
-    changes = load_changes()
-    if args.branch_limit:
-        branches = set(map(operator.itemgetter('branch'), changes))
-        most_recent_branches = set(sorted(branches, key=int, reverse=True)[:int(args.branch_limit)])
-        changes = filter(lambda change: change['branch'] in most_recent_branches, changes)
+def load_and_filter_changes(repository=None, branch_limit=None, show_progress=True):
+    return filter_bad_changes(load_changes(repository, show_progress))
 
-    changes.sort(key=operator.itemgetter('repository', 'svn_revision'))
-    for repository, per_repo_changes in itertools.groupby(changes, key=operator.itemgetter('repository')):
+
+def stats_command(args):
+    for repository in REPOSITORIES:
+        changes = load_and_filter_changes(repository['name'], branch_limit=args.branch_limit)
+        changes.sort(key=operator.itemgetter('svn_revision'))
         print "\nRepository: %s" % repository
         # print_stats may try to iterate over the iterator more than once, so make it a list.
-        print_stats(list(per_repo_changes))
+        print_stats(list(changes))
 
 
 def check_command(args):
-    changes = load_changes()
-
-    changes.sort(key=operator.itemgetter('repository', 'svn_revision'))
-    for repository, per_repo_changes in itertools.groupby(changes, key=operator.itemgetter('repository')):
-        print "\nRepository: %s" % repository
-        per_repo_changes = list(per_repo_changes)
-        first_revision = per_repo_changes[0]['svn_revision']
-        last_revision = per_repo_changes[-1]['svn_revision']
-        missing_count = int(last_revision) - int(first_revision) - len(per_repo_changes)
-        print "%d changes %s:%s (missing %d)" % (len(per_repo_changes), first_revision, last_revision, missing_count)
+    for repository in REPOSITORIES:
+        changes = load_changes(repository['name'], branch_limit=args.branch_limit)
+        changes.sort(key=operator.itemgetter('svn_revision'))
+        print "\nRepository: %s" % repository['name']
+        first_revision = changes[0]['svn_revision']
+        last_revision = changes[-1]['svn_revision']
+        missing_count = int(last_revision) - int(first_revision) - len(changes)
+        print "%d changes %s:%s (missing %d)" % (len(changes), first_revision, last_revision, missing_count)
         # FIXME: What are these changes we're missing? All branch commits?
-        # for first, second in window(per_repo_changes):
+        # for first, second in window(changes):
         #     first_revision = int(first['svn_revision'])
         #     second_revision = int(second['svn_revision'])
         #     if (second_revision - first_revision) == 1:
@@ -748,12 +770,13 @@ def graph_command(args):
     # FIXME: chunk_size should be controlable via an argument.
     chunk_size = 10
     ordered_events = GRAPH_ORDERED_EVENTS
-    changes = load_changes()
-    changes.sort(key=operator.itemgetter('repository', 'svn_revision'))
-    for repository, per_repo_changes in itertools.groupby(changes, key=operator.itemgetter('repository')):
+
+    for repository in REPOSITORIES:
+        changes = load_and_filter_changes(repository['name'])
+        changes.sort(key=operator.itemgetter('svn_revision'))
         print "window.%s_stats = [" % repository
         print ['svn_revision'] + diff_names(ordered_events), ","
-        json_lists = [_json_list(change_stats(change, ordered_events), change, ordered_events) for change in per_repo_changes]
+        json_lists = [_json_list(change_stats(change, ordered_events), change, ordered_events) for change in changes]
         # FIXME: It's possible that remove_outliers is removing records based on SVN revision.
         json_lists = remove_outliers(json_lists)
         # It's a bit odd to avg svn revisions, but whatever.
@@ -801,6 +824,7 @@ def main(args):
 
     check_parser = subparsers.add_parser('check')
     check_parser.set_defaults(func=check_command)
+    check_parser.add_argument('--branch-limit', default=None, type=int)
 
     debug_parser = subparsers.add_parser('debug')
     debug_parser.set_defaults(func=debug_command)
