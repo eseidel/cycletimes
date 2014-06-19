@@ -675,7 +675,13 @@ def stats_command(args):
         changes = load_and_filter_changes(repository['name'], branch_limit=args.branch_limit)
         changes.sort(key=operator.itemgetter('svn_revision'))
         print "\nRepository: %s" % repository['name']
-        print_stats(changes)
+
+        if args.by_month:
+            for month, values in itertools.groupby(changes, key=lambda change: change['branch_release_date'].strftime('%m/%Y')):
+                print month
+                print_stats(list(values))
+        else:
+            print_stats(changes)
 
 
 def print_missing_revisions(changes):
@@ -832,6 +838,7 @@ def main(args):
     stats_parser = subparsers.add_parser('stats')
     stats_parser.set_defaults(func=stats_command)
     stats_parser.add_argument('--branch-limit', default=None, type=int)
+    stats_parser.add_argument('--by-month', action='store_true')
 
     graph_parser = subparsers.add_parser('graph')
     graph_parser.set_defaults(func=graph_command)
