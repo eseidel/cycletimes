@@ -675,8 +675,16 @@ def stats_command(args):
         changes = load_and_filter_changes(repository['name'], branch_limit=args.branch_limit)
         changes.sort(key=operator.itemgetter('svn_revision'))
         print "\nRepository: %s" % repository['name']
-        # print_stats may try to iterate over the iterator more than once, so make it a list.
-        print_stats(list(changes))
+        print_stats(changes)
+
+
+def print_missing_revisions(changes):
+    for first, second in window(changes):
+        first_revision = int(first['svn_revision'])
+        second_revision = int(second['svn_revision'])
+        if (second_revision - first_revision) == 1:
+            continue
+        print "Missing", range(first_revision + 1, second_revision)
 
 
 def check_repository(args, repository):
@@ -688,16 +696,9 @@ def check_repository(args, repository):
     missing_count = int(last_revision) - int(first_revision) - len(changes)
     print "%d changes %s:%s (missing %d)" % (len(changes), first_revision, last_revision, missing_count)
 
-    if not args.list_missing:
-        return
-
     # FIXME: What are these changes we're missing? All branch commits?
-    for first, second in window(changes):
-        first_revision = int(first['svn_revision'])
-        second_revision = int(second['svn_revision'])
-        if (second_revision - first_revision) == 1:
-            continue
-        print "Missing", range(first_revision + 1, second_revision)
+    if args.list_missing:
+        print_missing_revisions(changes)
 
 
 def check_command(args):
