@@ -152,6 +152,16 @@ def path_for_branch(repository, name):
     return "%s/%s" % (repository['branch_heads'], name)
 
 
+# Rietveld appears to use a serialization format with optional ms.
+# e.g. https://codereview.chromium.org/api/202813005 'create' time
+# or https://codereview.chromium.org/api/194383003?messages=true (messages[0]['date'])
+def parse_rietveld_date(date_string):
+    try:
+        return parse_datetime_ms(date_string)
+    except ValueError:
+        return parse_datetime(date_string)
+
+
 def parse_datetime_ms(date_string):
     # Microseconds just make debug printing ugly.
     return datetime.datetime.strptime(date_string, PYTHON_DATE_FORMAT_MS).replace(microsecond = 0)
@@ -161,18 +171,29 @@ def parse_datetime(date_string):
     return datetime.datetime.strptime(date_string, PYTHON_DATE_FORMAT)
 
 
-# FIXME: This could share logic with other CSV reading functions.
+def release_history(channel, os):
+    # Query limit is 1000, so to go back far enough we need to query
+    # each os/channel pair separately.
+    url = RELEASE_HISTORY_CSV_URL + "?os=%s&channel=%s" % (os, channel)
+    with requests_cache.disabled():
+        history_text = requests.get(url).text
+    lines = history_text.strip('\n').split('\n')
+    expected_fields = ['os', 'channel', 'version', 'timestamp']
+    releases = read_csv_lines(lines, expected_fields)
+    return releases
+
+
 def fetch_branch_release_times():
     release_times = {}
-    # Always grab the most recent release history.
-    with requests_cache.disabled():
-        history_text = requests.get(RELEASE_HISTORY_CSV_URL).text
-    lines = history_text.strip('\n').split('\n')
-    assert(lines[0] == 'os,channel,version,timestamp')
-    for line in lines[1:]:
-        os, channel, version, date_string = line.split(',')
-        date = parse_datetime_ms(date_string)
-        branch = version.split('.')[2]
+    # The win canary has been broken for multiple days at times.
+    # So read both Win and Mac canary releases -- hitting either
+    # canary will count as 'releasing'.
+    releases = release_history('canary', 'win')
+    relases += release_history('canary', 'mac')
+
+    for release in releases:
+        date = parse_datetime_ms(release['timestamp'])
+        branch = release['version'].split('.')[2]
         last_date = release_times.get(branch)
         if not last_date or last_date > date:
             release_times[branch] = date
@@ -209,6 +230,10 @@ def fetch_review(review_id):
     except ValueError, e:
         if "Sign in" in response.text:
             log.warn("%s is restricted" % review_url)
+        elif "No issue exists with that id" in response.text:
+            # e.g.  https://codereview.chromium.org/api/202303004?messages=true
+            # from Chromium's bbee25f
+            log.warn("%s was deleted" % review_url)
         else:
             log.error("Unknown error parsing %s (%s)" % (review_url, e))
 
@@ -234,22 +259,23 @@ def review_times(review_id, commit_id):
     if not review:
         log.debug('Skipping %s, failed to fetch/parse review JSON.' % commit_id)
         return change
-    change['review_create_date'] = parse_datetime_ms(review['created'])
+
+    change['review_create_date'] = parse_rietveld_date(review['created'])
 
     messages = review['messages']
     if not messages:
         log.error('Review %s from %s has 0 messages??' % (review_id, commit_id))
 
-    change['review_sent_date'] = parse_datetime_ms(messages[0]['date']) if messages else None
+    change['review_sent_date'] = parse_rietveld_date(messages[0]['date']) if messages else None
 
-    lgtms = [parse_datetime_ms(m['date']) for m in messages if m['approval']]
+    lgtms = [parse_rietveld_date(m['date']) for m in messages if m['approval']]
     change['lgtms'] = len(lgtms)
     change['first_lgtm_date'] = lgtms[0] if lgtms else None
     change['last_lgtm_date'] = lgtms[-1] if lgtms else None
 
     # We could also look for "The CQ bit was checked by" instead
     # but I'm not sure how long rietveld has been adding that.
-    cq_starts = [parse_datetime_ms(m['date']) for m in messages if m['text'].startswith('CQ is trying da patch.')]
+    cq_starts = [parse_rietveld_date(m['date']) for m in messages if m['text'].startswith('CQ is trying da patch.')]
     change['cq_starts'] = len(cq_starts)
     change['first_cq_start_date'] = cq_starts[0] if cq_starts else None
     change['last_cq_start_date'] = cq_starts[-1] if cq_starts else None
@@ -428,7 +454,7 @@ def update_command(args):
             # Warn about files which exist but don't have a corresponding branch?
             if not args.force and os.path.exists(cache_path):
                 filename = os.path.basename(cache_path)
-                records = read_csv(cache_path)
+                records = read_csv(cache_path, CSV_FIELD_ORDER)
                 if records is None:
                     log.debug("%s invalid, refetching." % filename)
                     sys.stderr.write('R')
@@ -456,15 +482,20 @@ def split_csv_line(csv_line):
     return csv_line.strip('\n').split(',')
 
 
-def read_csv(file_path):
-    csv_file = open(file_path)
-    fields = split_csv_line(csv_file.readline())
-    if fields != CSV_FIELD_ORDER:
+def read_csv_lines(lines, expected_fields=None):
+    fields = split_csv_line(lines[0])
+    if expected_fields and fields != expected_fields:
+        # FIXME: This should probably be an exception?
         log.debug("CSV Field mismatch, got: %s, expected: %s" %
-            (fields, CSV_FIELD_ORDER))
+            (fields, expected_fields))
         return None
 
-    return [dict(map(_convert_dates, zip(CSV_FIELD_ORDER, split_csv_line(line)))) for line in csv_file]
+    return [dict(map(_convert_dates, zip(fields, split_csv_line(line)))) for line in lines[1:]]
+
+
+def read_csv(file_path, expected_fields=None):
+    with open(file_path) as csv_file:
+        return read_csv_lines(list(csv_file), expected_fields)
 
 
 def seconds_between_keys(change, earlier_key, later_key, clamp_values=True):
@@ -583,7 +614,7 @@ def print_stats(changes):
 def load_changes():
     changes = []
     for path in glob.iglob(os.path.join(CACHE_NAME, '*.csv')):
-        records = read_csv(path)
+        records = read_csv(path, CSV_FIELD_ORDER)
         #log.debug("%s changes in %s" % (len(records), path))
         sys.stderr.write('.')
         sys.stderr.flush()
