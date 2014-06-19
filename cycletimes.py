@@ -571,7 +571,7 @@ def print_long_stats(changes, from_key, to_key):
         print "%s%%: %s" % (percentile, time_delta)
 
 
-def print_oneline_stats(changes, from_key, to_key):
+def print_oneline_stats(changes, from_key, to_key, include_keys=True):
     unfiltered_times = map(lambda change: seconds_between_keys(change, from_key, to_key, clamp_values=False), changes)
     times = filter(lambda seconds: seconds >= 0, unfiltered_times)
     mean = datetime.timedelta(seconds=int(numpy.mean(times)))
@@ -579,7 +579,9 @@ def print_oneline_stats(changes, from_key, to_key):
     # Just mean and median.
     filtered_count = len(unfiltered_times) - len(times)
     filtered_percent = int(float(filtered_count) / len(times) * 100)
-    print "%14s -> %14s %16s %16s  %s (%s%%)" % (from_key[:-5], to_key[:-5], median, mean, filtered_count, filtered_percent)
+    if include_keys:
+        print "%14s -> %14s " % (from_key[:-5], to_key[:-5]),
+    print "%16s %16s  %s (%s%%)" % (median, mean, filtered_count, filtered_percent)
 
 
 def _int_values(changes, value_name):
@@ -682,6 +684,22 @@ def stats_command(args):
                 print_stats(list(values))
         else:
             print_stats(changes)
+
+
+def by_month_command(args):
+    from_key = args.from_prefix + '_date' if args.from_prefix else ALL_ORDERED_EVENTS[0]
+    to_key = args.to_prefix + '_date' if args.to_prefix else ALL_ORDERED_EVENTS[-1]
+
+    for repository in REPOSITORIES:
+        changes = load_and_filter_changes(repository['name'], branch_limit=args.branch_limit)
+        changes.sort(key=operator.itemgetter('svn_revision'))
+        print "\nRepository: %s" % repository['name']
+        print "%14s -> %14s" % (from_key[:-5], to_key[:-5])
+        print "%6s %16s %16s  %s" % ('month', 'median', 'mean', 'ignored')
+
+        for month, month_changes in itertools.groupby(changes, key=lambda change: change['branch_release_date'].strftime('%m/%Y')):
+            print '%s ' % month,
+            print_oneline_stats(month_changes, from_key, to_key, include_keys=False)
 
 
 def print_missing_revisions(changes):
@@ -839,6 +857,12 @@ def main(args):
     stats_parser.set_defaults(func=stats_command)
     stats_parser.add_argument('--branch-limit', default=None, type=int)
     stats_parser.add_argument('--by-month', action='store_true')
+
+    by_month_parser = subparsers.add_parser('by_month')
+    by_month_parser.set_defaults(func=by_month_command)
+    by_month_parser.add_argument('--branch-limit', default=None, type=int)
+    by_month_parser.add_argument('--from', dest='from_prefix', default=None, type=str)
+    by_month_parser.add_argument('--to', dest='to_prefix', default=None, type=str)
 
     graph_parser = subparsers.add_parser('graph')
     graph_parser.set_defaults(func=graph_command)
