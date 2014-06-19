@@ -650,6 +650,26 @@ def stats_command(args):
         print_stats(list(per_repo_changes))
 
 
+def check_command(args):
+    changes = load_changes()
+
+    changes.sort(key=operator.itemgetter('repository', 'svn_revision'))
+    for repository, per_repo_changes in itertools.groupby(changes, key=operator.itemgetter('repository')):
+        print "\nRepository: %s" % repository
+        per_repo_changes = list(per_repo_changes)
+        first_revision = per_repo_changes[0]['svn_revision']
+        last_revision = per_repo_changes[-1]['svn_revision']
+        missing_count = int(last_revision) - int(first_revision) - len(per_repo_changes)
+        print "%d changes %s:%s (missing %d)" % (len(per_repo_changes), first_revision, last_revision, missing_count)
+        # FIXME: What are these changes we're missing? All branch commits?
+        # for first, second in window(per_repo_changes):
+        #     first_revision = int(first['svn_revision'])
+        #     second_revision = int(second['svn_revision'])
+        #     if (second_revision - first_revision) == 1:
+        #         continue
+        #     print "Missing", range(first_revision + 1, second_revision)
+
+
 # FIXME: There must be a simpler way to write this.
 def change_stats(change, ordered_events):
     results = {}
@@ -778,6 +798,9 @@ def main(args):
 
     graph_parser = subparsers.add_parser('graph')
     graph_parser.set_defaults(func=graph_command)
+
+    check_parser = subparsers.add_parser('check')
+    check_parser.set_defaults(func=check_command)
 
     debug_parser = subparsers.add_parser('debug')
     debug_parser.set_defaults(func=debug_command)
