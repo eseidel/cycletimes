@@ -642,16 +642,21 @@ def load_changes(repository=None, branch_limit=None, show_progress=True):
             sys.stderr.flush()
         if records:
             changes.extend(records)
+    if show_progress:
+        sys.stderr.write('\n')
     return changes
 
 
 def filter_bad_changes(changes):
-    # FIXME: We may want to make filtering an explicit step?
     no_bots = filter(lambda change: change['commit_author'] not in BOT_AUTHORS, changes)
+    log.debug("Removed %d changes from bots." % (len(changes) - len(no_bots)))
+    late_lgtms = 0
     for change in no_bots:
         # LGTMs after commit are common, but can just be ignored for our stats.
         if change['first_lgtm_date'] and change['first_lgtm_date'] > change['commit_date']:
             change['first_lgtm_date'] = None
+            late_lgtms += 1
+    log.debug("Ignored %d late lgtms." % late_lgtms)
 
     # if not change['review_id']:
     #     if change['commit_author'] not in NO_REVIEW_URL_AUTHORS:
@@ -661,35 +666,43 @@ def filter_bad_changes(changes):
     return no_bots
 
 
-def load_and_filter_changes(repository=None, branch_limit=None, show_progress=True):
-    return filter_bad_changes(load_changes(repository, show_progress))
+def load_and_filter_changes(*args, **kwargs):
+    return filter_bad_changes(load_changes(*args, **kwargs))
 
 
 def stats_command(args):
     for repository in REPOSITORIES:
         changes = load_and_filter_changes(repository['name'], branch_limit=args.branch_limit)
         changes.sort(key=operator.itemgetter('svn_revision'))
-        print "\nRepository: %s" % repository
+        print "\nRepository: %s" % repository['name']
         # print_stats may try to iterate over the iterator more than once, so make it a list.
         print_stats(list(changes))
 
 
+def check_repository(args, repository):
+    changes = load_changes(repository['name'], branch_limit=args.branch_limit)
+    changes.sort(key=operator.itemgetter('svn_revision'))
+    print "\nRepository: %s" % repository['name']
+    first_revision = changes[0]['svn_revision']
+    last_revision = changes[-1]['svn_revision']
+    missing_count = int(last_revision) - int(first_revision) - len(changes)
+    print "%d changes %s:%s (missing %d)" % (len(changes), first_revision, last_revision, missing_count)
+
+    if not args.list_missing:
+        return
+
+    # FIXME: What are these changes we're missing? All branch commits?
+    for first, second in window(changes):
+        first_revision = int(first['svn_revision'])
+        second_revision = int(second['svn_revision'])
+        if (second_revision - first_revision) == 1:
+            continue
+        print "Missing", range(first_revision + 1, second_revision)
+
+
 def check_command(args):
     for repository in REPOSITORIES:
-        changes = load_changes(repository['name'], branch_limit=args.branch_limit)
-        changes.sort(key=operator.itemgetter('svn_revision'))
-        print "\nRepository: %s" % repository['name']
-        first_revision = changes[0]['svn_revision']
-        last_revision = changes[-1]['svn_revision']
-        missing_count = int(last_revision) - int(first_revision) - len(changes)
-        print "%d changes %s:%s (missing %d)" % (len(changes), first_revision, last_revision, missing_count)
-        # FIXME: What are these changes we're missing? All branch commits?
-        # for first, second in window(changes):
-        #     first_revision = int(first['svn_revision'])
-        #     second_revision = int(second['svn_revision'])
-        #     if (second_revision - first_revision) == 1:
-        #         continue
-        #     print "Missing", range(first_revision + 1, second_revision)
+        check_repository(args, repository)
 
 
 # FIXME: There must be a simpler way to write this.
@@ -825,6 +838,7 @@ def main(args):
     check_parser = subparsers.add_parser('check')
     check_parser.set_defaults(func=check_command)
     check_parser.add_argument('--branch-limit', default=None, type=int)
+    check_parser.add_argument('--list-missing', action='store_true')
 
     debug_parser = subparsers.add_parser('debug')
     debug_parser.set_defaults(func=debug_command)
