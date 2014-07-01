@@ -29,7 +29,7 @@ TODO:
 - Understand Reverts
 - Could show what % of time was due to tree-closures by
 overlapping lgtm -> commit time with tree closure data?
-- Could show what % of tiem was due to CQ by overlapping
+- Could show what % of time was due to CQ by overlapping
 CQ data with lgtm -> commit time.
 - Want to show what % of a typical patch time is spent waiting for X.
 

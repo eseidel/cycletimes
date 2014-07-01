@@ -46,6 +46,7 @@ CSV_FIELD_ORDER = [
     'commit_id',
     'svn_revision',
     'commit_author',
+    'review_base_url',
     'review_id',
     'branch',
     'review_create_date',
@@ -82,7 +83,10 @@ GRAPH_ORDERED_EVENTS = [
 ]
 
 # These are specific to Chrome and would need to be updated for Blink, etc.
-RIETVELD_URL = "https://codereview.chromium.org"
+RIETVELD_URLS = [
+    'https://codereview.chromium.org',
+    'https://chromiumcodereview.appspot.com',
+]
 
 # Times reported here are GMT, release-went-live times.
 RELEASE_HISTORY_CSV_URL = 'http://omahaproxy.appspot.com/history'
@@ -127,7 +131,7 @@ REPOSITORIES = [
 
 # For matching git commit messages:
 # FIXME: This may need to be repository-relative for Skia, etc.
-REVIEW_REGEXP = re.compile(r"Review URL: %s/(?P<review_id>\d+)" % RIETVELD_URL)
+REVIEW_REGEXPS = [re.compile(r"Review URL: (?P<review_base_url>%s)/(?P<review_id>\d+)" % url) for url in RIETVELD_URLS]
 
 
 def fetch_recent_branches(repository):
@@ -189,7 +193,7 @@ def fetch_branch_release_times():
     # So read both Win and Mac canary releases -- hitting either
     # canary will count as 'releasing'.
     releases = release_history('canary', 'win')
-    relases += release_history('canary', 'mac')
+    releases += release_history('canary', 'mac')
 
     for release in releases:
         date = parse_datetime_ms(release['timestamp'])
@@ -200,11 +204,16 @@ def fetch_branch_release_times():
     return release_times
 
 
-def review_id_from_lines(lines):
+def review_url_and_id_from_lines(lines, commit_id):
     for line in lines:
-        match = REVIEW_REGEXP.match(line)
-        if match:
-            return int(match.group("review_id"))
+        for regexp in REVIEW_REGEXPS:
+            match = regexp.match(line)
+            if match:
+                return match.group('review_base_url'), int(match.group('review_id'))
+        # Log about failure to understand Review URL patterns, but ignore reverts.
+        if 'Review URL' in line and line[0] != '>':
+            log.error('Missing Review URL pattern for %s: %s', commit_id, line)
+    return None, None
 
 
 def svn_revision_from_lines(lines, repository):
@@ -215,8 +224,8 @@ def svn_revision_from_lines(lines, repository):
             return int(match.group('svn_revision'))
 
 
-def fetch_review(review_id):
-    review_url = "%s/api/%s?messages=true" % (RIETVELD_URL, review_id)
+def fetch_review(review_base_url, review_id):
+    review_url = "%s/api/%s?messages=true" % (review_base_url, review_id)
     try:
         response = requests.get(review_url, timeout=10)
         if not getattr(response, 'from_cache', False):
@@ -247,15 +256,15 @@ def commit_times(commit_id, repository):
     change['commit_date'] = datetime.datetime.utcfromtimestamp(int(lines.pop(0)))
     change['commit_author'] = lines.pop(0)
     change['svn_revision'] = svn_revision_from_lines(lines, repository)
-    change['review_id'] = review_id_from_lines(lines)
+    change['review_base_url'], change['review_id'] = review_url_and_id_from_lines(lines, commit_id)
     return change
 
 
-def review_times(review_id, commit_id):
+def review_times(review_base_url, review_id, commit_id):
     change = {}
     if not review_id:
         return change
-    review = fetch_review(review_id)
+    review = fetch_review(review_base_url, review_id)
     if not review:
         log.debug('Skipping %s, failed to fetch/parse review JSON.' % commit_id)
         return change
@@ -293,7 +302,7 @@ def change_times(commit_id, branch, repository, branch_release_times):
         'branch_release_date': branch_release_times.get(branch),
     })
     change.update(commit_times(commit_id, repository))
-    change.update(review_times(change['review_id'], commit_id))
+    change.update(review_times(change['review_base_url'], change['review_id'], commit_id))
     return change
 
 
@@ -486,8 +495,8 @@ def read_csv_lines(lines, expected_fields=None):
     fields = split_csv_line(lines[0])
     if expected_fields and fields != expected_fields:
         # FIXME: This should probably be an exception?
-        log.debug("CSV Field mismatch, got: %s, expected: %s" %
-            (fields, expected_fields))
+        # log.debug("CSV Field mismatch, got: %s, expected: %s" %
+        #     (fields, expected_fields))
         return None
 
     return [dict(map(_convert_dates, zip(fields, split_csv_line(line)))) for line in lines[1:]]
@@ -571,17 +580,15 @@ def print_long_stats(changes, from_key, to_key):
         print "%s%%: %s" % (percentile, time_delta)
 
 
-def print_oneline_stats(changes, from_key, to_key, include_keys=True):
+def print_oneline_stats(changes, from_key, to_key):
     unfiltered_times = map(lambda change: seconds_between_keys(change, from_key, to_key, clamp_values=False), changes)
     times = filter(lambda seconds: seconds >= 0, unfiltered_times)
     mean = datetime.timedelta(seconds=int(numpy.mean(times)))
     median = datetime.timedelta(seconds=int(numpy.median(times)))
     # Just mean and median.
     filtered_count = len(unfiltered_times) - len(times)
-    filtered_percent = int(float(filtered_count) / len(times) * 100)
-    if include_keys:
-        print "%14s -> %14s " % (from_key[:-5], to_key[:-5]),
-    print "%16s %16s  %s (%s%%)" % (median, mean, filtered_count, filtered_percent)
+    filtered_percent = int(float(filtered_count) / len(unfiltered_times) * 100)
+    print "%14s -> %14s %16s %16s  %s (%s%%)" % (from_key[:-5], to_key[:-5], median, mean, filtered_count, filtered_percent)
 
 
 def _int_values(changes, value_name):
@@ -686,6 +693,25 @@ def stats_command(args):
             print_stats(changes)
 
 
+# FIXME: Perhaps this should share code with print_online_stats
+def print_month_oneline_stats(month, changes, from_key, to_key):
+    unfiltered_times = map(lambda change: seconds_between_keys(change, from_key, to_key, clamp_values=False), changes)
+    nones = sum(1 for time in unfiltered_times if time is None)
+    times = filter(lambda seconds: seconds >= 0, unfiltered_times)
+    mean = datetime.timedelta(seconds=int(numpy.mean(times)))
+    median = datetime.timedelta(seconds=int(numpy.median(times)))
+    # Just mean and median.
+    filtered_count = len(unfiltered_times) - len(times)
+    filtered_percent = int(float(filtered_count) / len(unfiltered_times) * 100)
+    print "%6s %16s %16s  %4s %5s (%s%%) %s" % (month, median, mean, len(unfiltered_times), filtered_count, filtered_percent, nones)
+
+    # filtered = filter(lambda change: seconds_between_keys(change, from_key, to_key, clamp_values=False) is None, changes)
+    # import random
+    # example = random.choice(filtered)
+    # print "Random filtered: ", example['commit_id'], example['review_id']
+
+
+
 def by_month_command(args):
     from_key = args.from_prefix + '_date' if args.from_prefix else ALL_ORDERED_EVENTS[0]
     to_key = args.to_prefix + '_date' if args.to_prefix else ALL_ORDERED_EVENTS[-1]
@@ -693,13 +719,13 @@ def by_month_command(args):
     for repository in REPOSITORIES:
         changes = load_and_filter_changes(repository['name'], branch_limit=args.branch_limit)
         changes.sort(key=operator.itemgetter('svn_revision'))
-        print "\nRepository: %s" % repository['name']
-        print "%14s -> %14s" % (from_key[:-5], to_key[:-5])
-        print "%6s %16s %16s  %s" % ('month', 'median', 'mean', 'ignored')
+        print '\nRepository: %s' % repository['name']
+        print '%s -> %s' % (from_key[:-5], to_key[:-5])
+        print '%6s %16s %16s  %s %s %s' % ('month', 'median', 'mean', 'count', 'ignored', 'missing')
 
         for month, month_changes in itertools.groupby(changes, key=lambda change: change['branch_release_date'].strftime('%m/%Y')):
-            print '%s ' % month,
-            print_oneline_stats(month_changes, from_key, to_key, include_keys=False)
+            month_changes = filter(lambda change: change['commit_author'] not in NO_REVIEW_URL_AUTHORS, month_changes)
+            print_month_oneline_stats(month, list(month_changes), from_key, to_key)
 
 
 def print_missing_revisions(changes):
@@ -708,17 +734,17 @@ def print_missing_revisions(changes):
         second_revision = int(second['svn_revision'])
         if (second_revision - first_revision) == 1:
             continue
-        print "Missing", range(first_revision + 1, second_revision)
+        print 'Missing', range(first_revision + 1, second_revision)
 
 
 def check_repository(args, repository):
     changes = load_changes(repository['name'], branch_limit=args.branch_limit)
     changes.sort(key=operator.itemgetter('svn_revision'))
-    print "\nRepository: %s" % repository['name']
+    print '\nRepository: %s' % repository['name']
     first_revision = changes[0]['svn_revision']
     last_revision = changes[-1]['svn_revision']
     missing_count = int(last_revision) - int(first_revision) - len(changes)
-    print "%d changes %s:%s (missing %d)" % (len(changes), first_revision, last_revision, missing_count)
+    print '%d changes %s:%s (missing %d)' % (len(changes), first_revision, last_revision, missing_count)
 
     # FIXME: What are these changes we're missing? All branch commits?
     if args.list_missing:
