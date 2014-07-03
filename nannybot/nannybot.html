@@ -1,0 +1,86 @@
+<!doctype html>
+<html>
+<head>
+  <title>Nannybot</title>
+  <meta name="viewport" content="width=device-width, minimum-scale=1.0, initial-scale=1.0, user-scalable=yes">
+  <script src="components/platform/platform.js"></script>
+  <script src="scripts/repositories.js"></script>
+  <link rel="import" href="components/font-roboto/roboto.html">
+  <style>
+  html,body {
+    height: 100%;
+    margin: 0;
+    background-color: #E5E5E5;
+    font-family: 'RobotoDraft', sans-serif;
+  }
+  </style>
+  <link rel="import" href="components/polymer/polymer.html">
+  <link rel="import" href="components/core-ajax/core-ajax.html">
+</head>
+
+<body unresolved touch-action="auto">
+
+<!-- FIXME: This should probably just be done via script. -->
+<polymer-element name="nb-changelogs" attributes="passing failing" noscript>
+	<template>
+  	<template if="{{passing.chromium != failing.chromium}}">
+  		<a href='http://build.chromium.org/f/chromium/perf/dashboard/ui/changelog.html?url=/trunk&range={{ passing.chromium }}:{{failing.chromium}}'>Cr</a>
+  	</template>
+  	<template if="{{passing.blink != failing.blink}}">
+  		<a href='http://build.chromium.org/f/chromium/perf/dashboard/ui/changelog_blink.html?url=/trunk&range={{ passing.blink }}:{{failing.blink}}'>Bl</a>
+  	</template>
+  	<template if="{{passing.v8 != failing.v8}}">
+  		<a href='http://build.chromium.org/f/chromium/perf/dashboard/ui/changelog_v8.html?url=/trunk&range={{ passing.v8 }}:{{failing.v8}}'>v8</a>
+  	</template>
+    <template if="{{passing.nacl != failing.nacl}}">
+      nacl ({{ passing.nacl }}:{{ failing.nacl }})
+    </template>
+  </template>
+</polymer-element>
+
+<polymer-element name="nb-alert-list" attributes="failures">
+  <template>
+    <style>
+      :host {
+        display: block;
+      }
+      .fail_link { background-color: #FCC;}
+      .pass_link { background-color: #CFC;}
+    </style>
+    <core-ajax url="/data" auto handleAs="json" response="{{ alerts }}"></core-ajax>
+    <table>
+    <tr><th>builder</th><th>count</th><th>failure</th><th>piece</th><th>edges</th><th>blame</th></tr>
+    <template repeat="{{ failure in alerts }}">
+      <template bind="{{ (failure.master_url + '/builders/' + failure.builder_name) as builder_url}}">
+      <tr>
+        <td><a href='{{builder_url}}'>{{failure.builder_name}}</a></td>
+        <td>{{failure.failing_build_count}} times</td>
+        <td>
+          <a href='{{builder_url}}/builds/{{failure.failing_build}}/steps/{{failure.step_name}}/logs/stdio'>{{failure.step_name}}</a>
+        </td>
+        <td>
+          {{failure.piece}}
+        </td>
+        <td>
+          <a class='fail_link' href="{{ builder_url + '/builds/' + failure.failing_build }}">F</a>
+          <a class='pass_link' href="{{ builder_url + '/builds/' + failure.passing_build }}">P</a>
+        </td>
+        <td>
+          <nb-changelogs passing="{{failure.passing_revisions}}" failing="{{failure.failing_revisions}}"></nb-changelogs>
+        </td>
+       </tr>
+       </template>
+    </template>
+    </table>
+  </template>
+  <script>
+  Polymer('nb-alert-list');
+  window.setInterval(function() {
+    document.querySelector("core-ajax").go();
+  }, 30000);
+  </script>
+</polymer-element>
+
+<nb-alert-list></nb-alert-list>
+</body>
+</html>

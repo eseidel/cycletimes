@@ -1,0 +1,16 @@
+application: auto-sheriff
+version: 1
+runtime: python27
+api_version: 1
+threadsafe: true
+
+handlers:
+- url: /
+  static_files: nannybot.html
+  upload: nannybot.html
+- url: /components
+  static_dir: components
+- url: /scripts
+  static_dir: scripts
+- url: /.*
+  script: main.app
