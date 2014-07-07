@@ -50,7 +50,10 @@ def stdio_for_step(master_url, builder_name, build, step):
 # These are reason finders, more than splitters?
 class GTestSplitter(object):
   def handles_step(self, step):
-    return True
+    step_name = step['name']
+    # Silly heuristic, at least we won't bother processing
+    # stdio from gclient revert, etc.
+    return step_name.endswith('tests')
 
   def split_step(self, step, build, builder_name, master_url):
     stdio_log = stdio_for_step(master_url, builder_name, build, step)
