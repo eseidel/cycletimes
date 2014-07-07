@@ -57,6 +57,14 @@ class GTestSplitter(object):
 
   def split_step(self, step, build, builder_name, master_url):
     stdio_log = stdio_for_step(master_url, builder_name, build, step)
+
+    # FIXME: This should use gtest_utils, but right now
+    # the GTestLogParser doesn't parse the following correctly:
+    # WebRtcGetUserMediaBrowserTests/WebRtcGetUserMediaBrowserTest.TwoGetUserMediaWithFirstHdSecondVga/0
+    # (doesn't remove the /0)
+    # Android gtests are also named with org.chromium prefixes which
+    # confuses GTestLogParser.
+
     log_parser = gtest_utils.GTestLogParser()
     for line in stdio_log.split('\n'):
       log_parser.ProcessLine(line)
