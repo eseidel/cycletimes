@@ -8,7 +8,7 @@ handlers:
 - url: /
   static_files: nannybot.html
   upload: nannybot.html
-- url: /components
+- url: /bower_components
   static_dir: components
 - url: /scripts
   static_dir: scripts

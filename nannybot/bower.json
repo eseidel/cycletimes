@@ -1,0 +1,20 @@
+{
+  "name": "auto-sheriff",
+  "version": "0.0.0",
+  "homepage": "auto-sheriff.appspot.com",
+  "authors": [
+    "Eric Seidel <eseidel@chromium.org>"
+  ],
+  "main": "nannybot.html",
+  "license": "Chromium",
+  "ignore": [
+    "**/.*",
+    "node_modules",
+    "bower_components",
+    "test",
+    "tests"
+  ],
+  "dependencies": {
+    "polymer": "Polymer/polymer#~0.3.3"
+  }
+}
