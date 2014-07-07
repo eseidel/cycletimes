@@ -2,6 +2,12 @@
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
+import sys
+import urllib
+import requests
+import urlparse
+import json
+
 # This is relative to build/scripts:
 # https://chromium.googlesource.com/chromium/tools/build/+/master/scripts
 BUILD_SCRIPTS_PATH = "/src/build/scripts"

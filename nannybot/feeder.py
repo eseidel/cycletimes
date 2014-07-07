@@ -177,9 +177,13 @@ def compute_transition_and_failure_count(recent_builds, step_name, splitter,
 
 
 def alerts_for_builder(master_url, builder_name):
-  recent_builds = builds_for_builder(master_url, builder_name)
-  build = recent_builds[0]
   alerts = []
+  recent_builds = builds_for_builder(master_url, builder_name)
+  if not recent_builds:
+    log.warn("No recent builds for %s, skipping." % builder_name)
+    return alerts
+
+  build = recent_builds[0]
   # If we are not currently failing, we have no alerts to give.
   if build.get('results', 0) == 0:
     return alerts
@@ -212,6 +216,7 @@ def alerts_for_builder(master_url, builder_name):
 
       alerts.append({
         'master_url': master_url,
+        'last_result_time': step['times'][1],
         'builder_name': builder_name,
         'step_name': step['name'],
         'failing_build_count': fail_count,
