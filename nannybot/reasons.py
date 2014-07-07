@@ -2,17 +2,49 @@
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
+import json
+import logging
+import requests
 import sys
 import urllib
-import requests
 import urlparse
-import json
+import argparse
+import re
 
 # This is relative to build/scripts:
 # https://chromium.googlesource.com/chromium/tools/build/+/master/scripts
 BUILD_SCRIPTS_PATH = "/src/build/scripts"
 sys.path.append(BUILD_SCRIPTS_PATH)
 from common import gtest_utils
+
+# Python logging is stupidly verbose to configure.
+def setup_logging():
+    logger = logging.getLogger(__name__)
+    logger.setLevel(logging.DEBUG)
+    handler = logging.StreamHandler()
+    handler.setLevel(logging.DEBUG)
+    formatter = logging.Formatter('%(levelname)s: %(message)s')
+    handler.setFormatter(formatter)
+    logger.addHandler(handler)
+    return logger, handler
+
+
+log, logging_handler = setup_logging()
+
+
+def build_url(master_url, builder_name, build_number):
+  quoted_name = urllib.pathname2url(builder_name)
+  args = (master_url, quoted_name, build_number)
+  return "%s/builders/%s/builds/%s" % args
+
+
+def stdio_for_step(master_url, builder_name, build, step):
+# FIXME: Should get this from the step in some way?
+  base_url = build_url(master_url, builder_name, build['number'])
+  stdio_url = "%s/steps/%s/logs/stdio/text" % (base_url, step['name'])
+
+  log.debug("Fetching: %s" % stdio_url)
+  return requests.get(stdio_url).text
 
 
 # These are reason finders, more than splitters?
@@ -26,21 +58,19 @@ class GTestSplitter(object):
     return step['name'] in GTEST_STEPS
 
   def split_step(self, step, build, builder_name, master_url):
-    # FIXME: Should get this from the step in some way?
-    quoted_name = urllib.pathname2url(builder_name)
-    args = (master_url, quoted_name, build['number'])
-    build_url = "%s/builders/%s/builds/%s" % args
-    stdio_url = "%s/steps/%s/logs/stdio" % (build_url, step['name'])
-
+    stdio_log = stdio_for_step(master_url, builder_name, build, step)
     log_parser = gtest_utils.GTestLogParser()
-    results = requests.get(stdio_url)
-    for line in results.text:
+    for line in stdio_log.split('\n'):
       log_parser.ProcessLine(line)
 
     failed_tests = log_parser.FailedTests()
+    log.debug('Failed tests: %s' % failed_tests)
+
     if failed_tests:
       return failed_tests
     # Failed to split, just group with the general failures.
+    log.debug('First Line: %s' % stdio_log.split('\n')[0])
+    log.debug('Passed tests: %s' % log_parser.PassedTests())
     return None
 
 
@@ -92,9 +122,11 @@ class LayoutTestsSplitter(object):
     # WTF?  The android bots call it archive_webkit_results and the rest call it archive_webkit_tests_results?
     archive_names = ['archive_webkit_results', 'archive_webkit_tests_results']
     archive_step = next((step for step in build['steps'] if step['name'] in archive_names), None)
+    url_to_build = build_url(master_url, builder_name, build['number'])
+
     if not archive_step:
+      log.warn('No archive step in %s' % url_to_build)
       print json.dumps(build['steps'], indent=1)
-      log.warn("Failed to find archive step for build %s" % build['number'])
       return None
 
     html_results_url = archive_step['urls'].get('layout test results')
@@ -103,7 +135,7 @@ class LayoutTestsSplitter(object):
       html_results_url = archive_step['urls'].get('results')
 
     if not html_results_url:
-      log.warn("Failed to find html results url for archive step in build %s" % build['number'])
+      log.warn('No results url for archive step in %s' % url_to_build)
       print json.dumps(archive_step, indent=1)
       return None
 
@@ -128,7 +160,69 @@ class LayoutTestsSplitter(object):
     return None
 
 
+class CompileSplitter(object):
+  def handles_step(self, step):
+    return step['name'] == 'compile'
+
+# Compile example:
+# FAILED: /mnt/data/b/build/goma/gomacc ...
+# ../../v8/src/base/platform/time.cc:590:7: error: use of undeclared identifier 'close'
+
+# Linker example:
+# FAILED: /b/build/goma/gomacc ...
+# obj/chrome/browser/extensions/interactive_ui_tests.extension_commands_global_registry_apitest.o:extension_commands_global_registry_apitest.cc:function extensions::SendNativeKeyEventToXDisplay(ui::KeyboardCode, bool, bool, bool): error: undefined reference to 'gfx::GetXDisplay()'
+
+  def split_step(self, step, build, builder_name, master_url):
+    stdio = stdio_for_step(master_url, builder_name, build, step)
+    compile_regexp = re.compile(r'(?P<path>.*):(?P<line>\d+):(?P<column>\d+): error:')
+
+    # FIXME: I'm sure there is a cleaner way to do this.
+    next_line_is_failure = False
+    for line in stdio.split('\n'):
+      if not next_line_is_failure:
+        if line.startswith('FAILED: '):
+          next_line_is_failure = True
+        continue
+
+      match = compile_regexp.match(line)
+      if match:
+        return ['%s:%s' % (match.group('path'), match.group('line'))]
+      break
+
+    return None
+
+
 STEP_SPLITTERS = [
+  CompileSplitter(),
   LayoutTestsSplitter(),
   GTestSplitter(),
 ]
+
+
+# For testing:
+def main(args):
+  parser = argparse.ArgumentParser()
+  parser.add_argument('stdio_url', action='store')
+  args = parser.parse_args(args)
+
+  # https://build.chromium.org/p/chromium.win/builders/XP%20Tests%20(1)/builds/31886/steps/browser_tests/logs/stdio
+  url_regexp = re.compile('(?P<master_url>.*)/builders/(?P<builder_name>.*)/builds/(?P<build_number>.*)/steps/(?P<step_name>.*)/logs/stdio')
+  match = url_regexp.match(args.stdio_url)
+  if not match:
+    print "Failed to parse URL: %s" % args.stdio_url
+    sys.exit(1)
+
+  step = {
+    'name': match.group('step_name'),
+  }
+  build = {
+    'number': match.group('build_number'),
+  }
+  splitter = next((splitter for splitter in STEP_SPLITTERS if splitter.handles_step(step)), None)
+  builder_name = urllib.unquote_plus(match.group('builder_name'))
+  master_url = match.group('master_url')
+  print splitter.split_step(step, build, builder_name, master_url)
+
+
+if __name__ == '__main__':
+  sys.exit(main(sys.argv[1:]))
