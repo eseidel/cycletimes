@@ -47,7 +47,7 @@ BUILDS_URL = 'https://chrome-build-extract.appspot.com/get_builds'
 
 # FIXME: This should just be an argument instead.
 DATA_URLS = [
-  # 'http://auto-sheriff.appspot.com/data',
+  'http://auto-sheriff.appspot.com/data',
   'http://localhost:8080/data'
 ]
 
@@ -157,6 +157,9 @@ def compute_transition_and_failure_count(recent_builds, step_name, splitter,
     if step_result not in NON_FAILING_RESULTS:
       if splitter and piece:
         pieces = splitter.split_step(step, build, builder_name, master_url)
+        # This build doesn't seem to have this step reason, ignore it.
+        if not pieces:
+          continue
         # Failed, but passed our piece!
         # FIXME: This is wrong for compile failures, and possibly
         # for test failures as well if not all tests are run...

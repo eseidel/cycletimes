@@ -48,7 +48,7 @@
   </template>
 </polymer-element>
 
-<polymer-element name="nb-alert-list" attributes="failures">
+<polymer-element name="nb-alert-list">
   <template>
     <style>
       :host {
@@ -57,19 +57,18 @@
       .fail_link { background-color: #FCC;}
       .pass_link { background-color: #CFC;}
     </style>
-    <core-ajax url="/data" id='loader' auto handleAs="json" response="{{ alerts }}"></core-ajax>
+    <core-ajax url="/data" id='loader' auto handleAs="json" response="{{ response }}"></core-ajax>
     <table>
-    <tr><th>builder</th><th>count</th><th>failure</th><th>piece</th><th>edges</th><th>blame</th><th>when</th></tr>
-    <template repeat="{{ failure in alerts }}">
+    <tr><th>master</th><th>builder</th><th>times</th><th>failure</th><th>edges</th><th>blame</th><th>when</th></tr>
+    <template repeat="{{ failure in response.content }}">
       <template bind="{{ (failure.master_url + '/builders/' + failure.builder_name) as builder_url}}">
       <tr>
+        <td>{{failure.master_url | master_name }}</td>
         <td><a href='{{builder_url}}'>{{failure.builder_name}}</a></td>
-        <td>{{failure.failing_build_count}} times</td>
+        <td>{{failure.failing_build_count}}</td>
         <td>
           <a href='{{builder_url}}/builds/{{failure.failing_build}}/steps/{{failure.step_name}}/logs/stdio'>{{failure.step_name}}</a>
-        </td>
-        <td>
-          {{failure.piece | falsy_to_empty}}
+          <div>{{failure.piece | falsy_to_empty}}</div>
         </td>
         <td>
           <a class='fail_link' href="{{ builder_url + '/builds/' + failure.failing_build }}">F</a>
@@ -85,6 +84,7 @@
        </template>
     </template>
     </table>
+    <div>Updated: {{ response.date | since_string }}</div>
   </template>
   <script>
     Polymer('nb-alert-list', {
@@ -101,6 +101,14 @@
       },
       falsy_to_empty: function(value) {
         return value ? value : '';
+      },
+      master_name: function(value) {
+        var url_parts = value.split('/');
+        var long_name = url_parts[url_parts.length - 1];
+        if (long_name.indexOf('chromium.') == 0) {
+          return long_name.slice('chromium.'.length);
+        }
+        return long_name;
       }
     });
   </script>
