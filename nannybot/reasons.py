@@ -51,6 +51,7 @@ def stdio_for_step(master_url, builder_name, build, step):
     log.error('Failed to fetch %s: %s' % (stdio_url, e))
     return None
 
+
 # These are reason finders, more than splitters?
 class GTestSplitter(object):
   def handles_step(self, step):
@@ -58,19 +59,6 @@ class GTestSplitter(object):
     # Silly heuristic, at least we won't bother processing
     # stdio from gclient revert, etc.
     return step_name.endswith('tests')
-
-  SWARMING_SUFFIX = re.compile(r'(?P<test_name>.*)/\d+$')
-
-  def remove_swarming_suffix(self, test_name):
-    # FIXME: This is a workaround for a bug in GTestLogParser
-    # which (although it has code for) does not seem to understand
-    # the trailing /0 /1, etc for swarming.
-    # e.g. WebRtcGetUserMediaBrowserTests/WebRtcGetUserMediaBrowserTest.TwoGetUserMediaWithFirstHdSecondVga/0
-    match = GTestSplitter.SWARMING_SUFFIX.match(test_name)
-    if match:
-      log.debug('Removed swarming suffix from %s' % test_name)
-      return match.group('test_name')
-    return test_name
 
   def split_step(self, step, build, builder_name, master_url):
     stdio_log = stdio_for_step(master_url, builder_name, build, step)
@@ -83,11 +71,6 @@ class GTestSplitter(object):
       log_parser.ProcessLine(line)
 
     failed_tests = log_parser.FailedTests()
-    # Workaround GTestLogParser bug:
-    failed_tests = sorted(set(map(self.remove_swarming_suffix, failed_tests)))
-    # FIXME: Android gtests are also named with org.chromium prefixes which
-    # confuses GTestLogParser.
-
     log.debug('Found %s failed tests.' % len(failed_tests))
 
     if failed_tests:
@@ -95,6 +78,40 @@ class GTestSplitter(object):
     # Failed to split, just group with the general failures.
     log.debug('First Line: %s' % stdio_log.split('\n')[0])
     log.debug('Passed tests: %s' % log_parser.PassedTests())
+    return None
+
+
+# Our Android tests produce very gtest-like output, but not
+# quite GTestLogParser-compatible (it parse the name of the
+# test as org.chromium).
+# C  367.973s Main  [  FAILED  ] org.chromium.android_webview.test.AwContentsClientShouldOverrideUrlLoadingTest#testCalledForUnsupportedSchemes
+class JUnitSplitter(object):
+  def handles_step(self, step):
+    KNOWN_STEPS = [
+      'androidwebview_instrumentation_tests',
+    ]
+    return step['name'] in KNOWN_STEPS
+
+  FAILED_REGEXP = re.compile('\[\s+FAILED\s+\] (?P<test_name>\S+)$')
+
+  def split_step(self, step, build, builder_name, master_url):
+    stdio_log = stdio_for_step(master_url, builder_name, build, step)
+    # Can't split if we can't get the logs.
+    if not stdio_log:
+      return None
+
+    failed_tests = []
+    for line in stdio_log.split('\n'):
+      match = self.FAILED_REGEXP.search(line)
+      if match:
+        failed_tests.append(match.group('test_name'))
+
+    log.debug('Found %s failed tests.' % len(failed_tests))
+
+    if failed_tests:
+      return failed_tests
+    # Failed to split, just group with the general failures.
+    log.debug('First Line: %s' % stdio_log.split('\n')[0])
     return None
 
 
@@ -223,6 +240,7 @@ class CompileSplitter(object):
 STEP_SPLITTERS = [
   CompileSplitter(),
   LayoutTestsSplitter(),
+  JUnitSplitter(),
   GTestSplitter(),
 ]
 
