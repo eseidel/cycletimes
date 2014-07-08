@@ -49,12 +49,6 @@ CONFIG_PATH = os.path.join(BUILD_SCRIPTS_PATH, 'slave', 'gatekeeper.json')
 BUILDERS_URL = 'https://chrome-build-extract.appspot.com/get_master/%s'
 BUILDS_URL = 'https://chrome-build-extract.appspot.com/get_builds'
 
-# FIXME: This should just be an argument instead.
-DATA_URLS = [
-  'http://auto-sheriff.appspot.com/data',
-  'http://localhost:8080/data'
-]
-
 
 # Success or Warnings or None (didn't run) don't count as 'failing'.
 NON_FAILING_RESULTS = (0, 1, None)
@@ -296,9 +290,9 @@ def fetch_alerts(args, gatekeeper_config):
 
 def main(args):
   parser = argparse.ArgumentParser()
+  parser.add_argument('data_url', action='store')
   parser.add_argument('--use-cache', action='store_true')
   parser.add_argument('--master-filter', action='store')
-  parser.add_argument('--show-pass', action='store_true')
   args = parser.parse_args(args)
 
   if args.use_cache:
@@ -309,9 +303,8 @@ def main(args):
   gatekeeper_config = gatekeeper_ng_config.load_gatekeeper_config(CONFIG_PATH)
   alerts = fetch_alerts(args, gatekeeper_config)
   data = { 'content': json.dumps(alerts) }
-  for url in DATA_URLS:
-    log.info('POST %s alerts to %s' % (len(alerts), url))
-    requests.post(url, data=data)
+  log.info('POST %s alerts to %s' % (len(alerts), args.data_url))
+  requests.post(args.data_url, data=data)
 
   # Find the list of failing steps?
   # Walk backwards until no failure.

@@ -44,8 +44,12 @@ def stdio_for_step(master_url, builder_name, build, step):
   stdio_url = "%s/steps/%s/logs/stdio/text" % (base_url, step['name'])
 
   log.debug("Fetching: %s" % stdio_url)
-  return requests.get(stdio_url).text
-
+  try:
+    return requests.get(stdio_url).text
+  except requests.exceptions.ConnectionError, e:
+    # Some builders don't save logs for whatever reason.
+    log.error('Failed to fetch %s: %s' % (stdio_url, e))
+    return None
 
 # These are reason finders, more than splitters?
 class GTestSplitter(object):
@@ -55,22 +59,36 @@ class GTestSplitter(object):
     # stdio from gclient revert, etc.
     return step_name.endswith('tests')
 
+  SWARMING_SUFFIX = re.compile(r'(?P<test_name>.*)/\d+$')
+
+  def remove_swarming_suffix(self, test_name):
+    # FIXME: This is a workaround for a bug in GTestLogParser
+    # which (although it has code for) does not seem to understand
+    # the trailing /0 /1, etc for swarming.
+    # e.g. WebRtcGetUserMediaBrowserTests/WebRtcGetUserMediaBrowserTest.TwoGetUserMediaWithFirstHdSecondVga/0
+    match = GTestSplitter.SWARMING_SUFFIX.match(test_name)
+    if match:
+      log.debug('Removed swarming suffix from %s' % test_name)
+      return match.group('test_name')
+    return test_name
+
   def split_step(self, step, build, builder_name, master_url):
     stdio_log = stdio_for_step(master_url, builder_name, build, step)
-
-    # FIXME: This should use gtest_utils, but right now
-    # the GTestLogParser doesn't parse the following correctly:
-    # WebRtcGetUserMediaBrowserTests/WebRtcGetUserMediaBrowserTest.TwoGetUserMediaWithFirstHdSecondVga/0
-    # (doesn't remove the /0)
-    # Android gtests are also named with org.chromium prefixes which
-    # confuses GTestLogParser.
+    # Can't split if we can't get the logs.
+    if not stdio_log:
+      return None
 
     log_parser = gtest_utils.GTestLogParser()
     for line in stdio_log.split('\n'):
       log_parser.ProcessLine(line)
 
     failed_tests = log_parser.FailedTests()
-    log.debug('Failed tests: %s' % failed_tests)
+    # Workaround GTestLogParser bug:
+    failed_tests = sorted(set(map(self.remove_swarming_suffix, failed_tests)))
+    # FIXME: Android gtests are also named with org.chromium prefixes which
+    # confuses GTestLogParser.
+
+    log.debug('Found %s failed tests: %s' % len(failed_tests))
 
     if failed_tests:
       return failed_tests
@@ -180,6 +198,10 @@ class CompileSplitter(object):
 
   def split_step(self, step, build, builder_name, master_url):
     stdio = stdio_for_step(master_url, builder_name, build, step)
+    # Can't split if we can't get the logs.
+    if not stdio:
+      return None
+
     compile_regexp = re.compile(r'(?P<path>.*):(?P<line>\d+):(?P<column>\d+): error:')
 
     # FIXME: I'm sure there is a cleaner way to do this.
