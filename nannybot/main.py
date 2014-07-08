@@ -23,10 +23,19 @@ class IgnoreRule(ndb.Model):
     date = ndb.DateTimeProperty(auto_now_add=True)
     pattern = ndb.StringProperty(indexed=False)
 
+    def matches(self, failure_dict):
+        pieces = self.pattern.split('=')
+        if len(pieces) != 2:
+            return False
+        key, value = pieces
+        if not key or not value:
+            return False
+        return value in failure_dict.get(key, '')
+
 
 class IgnoreHandler(webapp2.RequestHandler):
     def get(self):
-        query = IgnoreRule.query().order(-IgnoreRule.date)
+        query = IgnoreRule.query()
         ignore_dicts = map(ndb.Model.to_dict, query.fetch())
         self.response.write(json.dumps(ignore_dicts, cls=DateTimeEncoder))
 
@@ -41,10 +50,16 @@ class DataHandler(webapp2.RequestHandler):
     def get(self):
         query = AlertBlob.query().order(-AlertBlob.date)
         entries = query.fetch(1)
-        response_json = {
-            'date': entries[0].date if entries else None,
-            'content': json.loads(entries[0].content) if entries else None,
-        }
+        response_json = {}
+        if entries:
+            alerts = json.loads(entries[0].content)
+            ignores = IgnoreRule.query().fetch()
+            is_ignored = lambda alert: any(ignore.matches(alert) for ignore in ignores)
+            response_json = {
+                'date': entries[0].date,
+                'content': filter(lambda alert: not is_ignored(alert), alerts),
+                'ignores': map(ndb.Model.to_dict, ignores),
+            }
         self.response.write(json.dumps(response_json, cls=DateTimeEncoder))
 
     def post(self):

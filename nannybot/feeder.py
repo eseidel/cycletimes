@@ -297,7 +297,7 @@ def fetch_alerts(args, gatekeeper_config):
 
 def main(args):
   parser = argparse.ArgumentParser()
-  parser.add_argument('data_url', action='store')
+  parser.add_argument('data_url', action='store', nargs='*')
   parser.add_argument('--use-cache', action='store_true')
   parser.add_argument('--master-filter', action='store')
   args = parser.parse_args(args)
@@ -310,8 +310,9 @@ def main(args):
   gatekeeper_config = gatekeeper_ng_config.load_gatekeeper_config(CONFIG_PATH)
   alerts = fetch_alerts(args, gatekeeper_config)
   data = { 'content': json.dumps(alerts) }
-  log.info('POST %s alerts to %s' % (len(alerts), args.data_url))
-  requests.post(args.data_url, data=data)
+  for url in args.data_url:
+    log.info('POST %s alerts to %s' % (len(alerts), url))
+    requests.post(url, data=data)
 
   # Find the list of failing steps?
   # Walk backwards until no failure.

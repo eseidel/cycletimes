@@ -6,7 +6,6 @@
   <script src="components/platform/platform.js"></script>
   <script src="scripts/repositories.js"></script>
   <script src="scripts/third_party/js_humanized_time_span/humanized_time_span.js"></script>
-  <link rel="import" href="components/font-roboto/roboto.html">
   <style>
   html,body {
     height: 100%;
@@ -15,6 +14,7 @@
     font-family: 'RobotoDraft', sans-serif;
   }
   </style>
+  <link rel="import" href="components/font-roboto/roboto.html">
   <link rel="import" href="components/polymer/polymer.html">
   <link rel="import" href="components/core-ajax/core-ajax.html">
 </head>
@@ -48,7 +48,7 @@
   </template>
 </polymer-element>
 
-<polymer-element name="nb-alert-list">
+<polymer-element name="nb-alert-list" attributes='response'>
   <template>
     <style>
       :host {
@@ -57,7 +57,7 @@
       .fail_link { background-color: #FCC;}
       .pass_link { background-color: #CFC;}
     </style>
-    <core-ajax url="/data" id='loader' auto handleAs="json" response="{{ response }}"></core-ajax>
+    <div>Updated: {{ response.date | since_string }}</div>
     <table>
     <tr><th>master</th><th>builder</th><th>times</th><th>failure</th><th>edges</th><th>blame</th><th>when</th><th>closes</th></tr>
     <template repeat="{{ failure in response.content }}">
@@ -85,16 +85,9 @@
        </template>
     </template>
     </table>
-    <div>Updated: {{ response.date | since_string }}</div>
   </template>
   <script>
     Polymer('nb-alert-list', {
-      ready: function() {
-        window.setInterval(30000, function() {
-          console.log('refreshing');
-          this.$.loader.go();
-        });
-      },
       since_string: function(value) {
         // Buildbot talks to us in seconds, js expect milliseconds
         date = new Date(value * 1000.0);
@@ -115,8 +108,49 @@
   </script>
 </polymer-element>
 
-<nb-alert-list></nb-alert-list>
+<polymer-element name="nb-ignores-list" attributes='ignores'>
+<template>
+    <table>
+    <tr><th>pattern</th><th>added</th></tr>
+    <template repeat="{{ ignore in ignores }}">
+    <tr>
+    <td>{{ignore.pattern}}</td>
+    <td>{{ignore.date | since_string}}</td>
+    </tr>
+    </template>
+    </table>
+</template>
+<script>
+Polymer('nb-ignores-list', {
+  since_string: function(value) {
+    // Buildbot talks to us in seconds, js expect milliseconds
+    date = new Date(value * 1000.0);
+    return humanized_time_span(date);
+  },
+});
+</script>
+</polymer-element>
 
+<polymer-element name="nb-main">
+<template>
+<nb-alert-list response='{{response}}'></nb-alert-list>
+<nb-ignores-list ignores='{{response.ignores}}'></nb-ignores-list>
+<core-ajax url="/data" id='loader' auto handleAs="json" response="{{ response }}"></core-ajax>
+</template>
+<script>
+Polymer('nb-main', {
+  ready: function() {
+    console.log('read');
+    window.setInterval(30 * 1000, function() {
+      console.log('refreshing');
+      this.$.loader.go();
+    });
+  }
+});
+</script>
+</polymer-element>
+
+<nb-main></nb-main>
 <form action='/ignore' method='post'>
 <core-field>
   <label>Pattern:</label><input name='pattern'>
