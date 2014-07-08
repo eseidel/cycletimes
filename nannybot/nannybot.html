@@ -1,7 +1,7 @@
 <!doctype html>
 <html>
 <head>
-  <title>Chromium Auto-Sheriff</title>
+  <title>Auto-Sheriff</title>
   <meta name="viewport" content="width=device-width, minimum-scale=1.0, initial-scale=1.0, user-scalable=yes">
   <script src="components/platform/platform.js"></script>
   <script src="scripts/repositories.js"></script>
@@ -59,7 +59,7 @@
     </style>
     <core-ajax url="/data" id='loader' auto handleAs="json" response="{{ response }}"></core-ajax>
     <table>
-    <tr><th>master</th><th>builder</th><th>times</th><th>failure</th><th>edges</th><th>blame</th><th>when</th></tr>
+    <tr><th>master</th><th>builder</th><th>times</th><th>failure</th><th>edges</th><th>blame</th><th>when</th><th>closes</th></tr>
     <template repeat="{{ failure in response.content }}">
       <template bind="{{ (failure.master_url + '/builders/' + failure.builder_name) as builder_url}}">
       <tr>
@@ -80,6 +80,7 @@
           <nb-changelogs passing="{{failure.passing_revisions}}" failing="{{failure.failing_revisions}}"></nb-changelogs>
         </td>
         <td>{{ failure.last_result_time | since_string }}</td>
+        <td>{{ failure.would_close_tree }}</td>
        </tr>
        </template>
     </template>

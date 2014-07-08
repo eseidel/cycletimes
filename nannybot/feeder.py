@@ -24,6 +24,10 @@ from slave import gatekeeper_ng_config
 import reasons
 
 
+# Masters:
+# https://apis-explorer.appspot.com/apis-explorer/?base=https://chrome-infra-stats.appspot.com/_ah/api#p/stats/v1/stats.masters.list?_h=1&
+
+
 # Python logging is stupidly verbose to configure.
 def setup_logging():
     logger = logging.getLogger(__name__)
@@ -114,6 +118,7 @@ def builds_for_builder(master_url, builder_name):
   return requests.get(BUILDS_URL, params=params).json()['builds']
 
 
+# FIXME: This belongs in gatekeeper_ng_config.py
 def excluded_builders(config):
     return config[0].get('*', {}).get('excluded_builders', set())
 
@@ -179,7 +184,42 @@ def compute_transition_and_failure_count(recent_builds, step_name, splitter,
   return last_pass, first_fail, fail_count
 
 
-def alerts_for_builder(master_url, builder_name):
+# FIXME: This belongs in gatekeeper_ng_config.py
+def would_close_tree(master_config, step_name):
+  # FIXME: Section support should be removed:
+  master_config = master_config[0]
+
+  # close_tree is currently unused in gatekeeper.json but planned to be.
+  close_tree = master_config.get('close_tree', True)
+  if not close_tree:
+    return False
+
+  # Excluded steps never close.
+  excluded_steps = set(master_config.get('excluded_steps', []))
+  if step_name in excluded_steps:
+    return False
+
+  # See gatekeeper_ng_config.py for documentation of
+  # the config format.
+  # forgiving/closing controls if mails are sent on close.
+  # steps/optional controls if step-absence indicates failure.
+  # this function assumes the step is present and failing
+  # and thus doesn't care between these 4 types:
+  closing_steps = set(master_config.get('forgiving_steps', []) +
+    master_config.get('forgiving_optional', []) +
+    master_config.get('closing_steps', []) + 
+    master_config.get('closing_optional', []))
+
+  # A '*' in any of the above types means it applies to all steps.
+  if '*' in closing_steps:
+    return True
+
+  if step_name in closing_steps:
+    return True
+  return False
+
+
+def alerts_for_builder(master_config, master_url, builder_name):
   alerts = []
   recent_builds = builds_for_builder(master_url, builder_name)
   if not recent_builds:
@@ -200,6 +240,8 @@ def alerts_for_builder(master_url, builder_name):
   for step in failing_steps:
     if step['name'] in IGNORED_STEPS:
       continue
+
+    would_close = would_close_tree(master_config, step['name'])
 
     pieces = None
     splitter = next((splitter for splitter in reasons.STEP_SPLITTERS if splitter.handles_step(step)), None)
@@ -228,6 +270,7 @@ def alerts_for_builder(master_url, builder_name):
         'failing_revisions': failing,
         'passing_revisions': passing,
         'piece': piece,
+        'would_close_tree': would_close,
       })
   return alerts
 
@@ -238,7 +281,7 @@ def alerts_for_master(master_url, master_config):
   alerts = []
   for builder_name in builder_names:
     log.debug("%s %s" % (master_url, builder_name))
-    alerts.extend(alerts_for_builder(master_url, builder_name))
+    alerts.extend(alerts_for_builder(master_config, master_url, builder_name))
   return alerts
 
 
