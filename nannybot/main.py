@@ -3,6 +3,7 @@ from google.appengine.ext import ndb
 import json
 import calendar
 import datetime
+import collections
 
 
 class DateTimeEncoder(json.JSONEncoder):
@@ -22,6 +23,11 @@ class AlertBlob(ndb.Model):
 class IgnoreRule(ndb.Model):
     date = ndb.DateTimeProperty(auto_now_add=True)
     pattern = ndb.StringProperty(indexed=False)
+
+    def dict_with_key(self):
+        failure_dict = self.to_dict()
+        failure_dict['key'] = self.key.id() # Should this be urlsafe?
+        return failure_dict
 
     def matches(self, failure_dict):
         pieces = self.pattern.split('=')
@@ -46,6 +52,14 @@ class IgnoreHandler(webapp2.RequestHandler):
         self.get()
 
 
+def group_by_reason(alerts):
+    by_reason = collections.defaultdict(list)
+    for alert in alerts:
+        # FIXME: Probably want something smarter here.
+        reason_key = '%s:%s' % (alert['step_name'], alert['piece'])
+        by_reason[reason_key].append(alert)
+
+
 class DataHandler(webapp2.RequestHandler):
     def get(self):
         query = AlertBlob.query().order(-AlertBlob.date)
@@ -54,11 +68,15 @@ class DataHandler(webapp2.RequestHandler):
         if entries:
             alerts = json.loads(entries[0].content)
             ignores = IgnoreRule.query().fetch()
-            is_ignored = lambda alert: any(ignore.matches(alert) for ignore in ignores)
+
+            def add_ignores(alert):
+                alert['ignored_by'] = [ignore.key.id() for ignore in ignores if ignore.matches(alert)]
+                return alert
             response_json = {
                 'date': entries[0].date,
-                'content': filter(lambda alert: not is_ignored(alert), alerts),
-                'ignores': map(ndb.Model.to_dict, ignores),
+                'content': map(add_ignores, alerts),
+                'ignores': map(IgnoreRule.dict_with_key, ignores),
+                'by_reason': group_by_reason(alerts)
             }
         self.response.write(json.dumps(response_json, cls=DateTimeEncoder))
 

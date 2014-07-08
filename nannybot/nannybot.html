@@ -48,7 +48,7 @@
   </template>
 </polymer-element>
 
-<polymer-element name="nb-alert-list" attributes='response'>
+<polymer-element name="nb-alert-list" attributes='failures'>
   <template>
     <style>
       :host {
@@ -57,10 +57,9 @@
       .fail_link { background-color: #FCC;}
       .pass_link { background-color: #CFC;}
     </style>
-    <div>Updated: {{ response.date | since_string }}</div>
     <table>
     <tr><th>master</th><th>builder</th><th>times</th><th>failure</th><th>edges</th><th>blame</th><th>when</th><th>closes</th></tr>
-    <template repeat="{{ failure in response.content }}">
+    <template repeat="{{ failure in failures }}">
       <template bind="{{ (failure.master_url + '/builders/' + failure.builder_name) as builder_url}}">
       <tr>
         <td>{{failure.master_url | master_name }}</td>
@@ -108,8 +107,14 @@
   </script>
 </polymer-element>
 
+<polymer-element name='nb-grouped-alert-list' attributes='failures' noscript>
+<template>
+</template>
+</polymer-element>
+
 <polymer-element name="nb-ignores-list" attributes='ignores'>
 <template>
+    <h3>Ignore Rules</h3>
     <table>
     <tr><th>pattern</th><th>added</th></tr>
     <template repeat="{{ ignore in ignores }}">
@@ -131,9 +136,14 @@ Polymer('nb-ignores-list', {
 </script>
 </polymer-element>
 
-<polymer-element name="nb-main">
+<polymer-element name="nb-main" attributes='failures filteredFailures displayedFailures'>
 <template>
-<nb-alert-list response='{{response}}'></nb-alert-list>
+<div>
+Updated: {{ response.date | since_string }},
+{{ displayedFailures.length }} failures ({{ failures.length - displayedFailures.length }} ignored)
+</div>
+<nb-alert-list failures='{{displayedFailures}}'></nb-alert-list>
+<nb-grouped-alert-list failures='{{displayedFailures}}'></nb-alert-list>
 <nb-ignores-list ignores='{{response.ignores}}'></nb-ignores-list>
 <core-ajax url="/data" id='loader' auto handleAs="json" response="{{ response }}"></core-ajax>
 </template>
@@ -145,17 +155,34 @@ Polymer('nb-main', {
       console.log('refreshing');
       this.$.loader.go();
     });
-  }
+  },
+  responseChanged: function(oldValue, newValue) {
+    this.failures = newValue.content;
+    this.filteredFailures = this.failures.filter(function(failure) { return !failure.ignored_by.length });
+    // Could have a check-box to toggle these.
+    this.displayedFailures = this.filteredFailures;
+  },
+  since_string: function(value) {
+    // Buildbot talks to us in seconds, js expect milliseconds
+    date = new Date(value * 1000.0);
+    return humanized_time_span(date);
+  },
 });
 </script>
 </polymer-element>
 
+<polymer-element name="nb-ignore-button" noscript attributes='pattern'>
+<template>
+</template>
+</polymer-element>
+
 <nb-main></nb-main>
-<form action='/ignore' method='post'>
+
+<!-- <form action='/ignore' method='post'>
 <core-field>
   <label>Pattern:</label><input name='pattern'>
 </core-field>
 <input type='submit'>
-</form>
+</form> -->
 </body>
 </html>

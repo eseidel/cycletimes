@@ -58,7 +58,13 @@ class GTestSplitter(object):
     step_name = step['name']
     # Silly heuristic, at least we won't bother processing
     # stdio from gclient revert, etc.
-    return step_name.endswith('tests')
+    if step_name.endswith('tests'):
+      return True
+
+    KNOWN_STEPS = [
+      # There are probably other gtest steps not named 'tests'.
+    ]
+    return step_name in KNOWN_STEPS
 
   def split_step(self, step, build, builder_name, master_url):
     stdio_log = stdio_for_step(master_url, builder_name, build, step)
