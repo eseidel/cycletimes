@@ -179,18 +179,23 @@ def compute_transition_and_failure_count(recent_builds, step_name, splitter,
 
 
 # FIXME: This belongs in gatekeeper_ng_config.py
-def would_close_tree(master_config, step_name):
+def would_close_tree(master_config, builder_name, step_name):
   # FIXME: Section support should be removed:
   master_config = master_config[0]
+  builder_config = master_config.get(builder_name, {})
+  if not builder_config:
+    builder_config = master_config.get('*', {})
 
   # close_tree is currently unused in gatekeeper.json but planned to be.
-  close_tree = master_config.get('close_tree', True)
+  close_tree = builder_config.get('close_tree', True)
   if not close_tree:
+    log.debug('close_tree is false')
     return False
 
   # Excluded steps never close.
-  excluded_steps = set(master_config.get('excluded_steps', []))
+  excluded_steps = set(builder_config.get('excluded_steps', []))
   if step_name in excluded_steps:
+    log.debug('%s is an excluded_step' % step_name)
     return False
 
   # See gatekeeper_ng_config.py for documentation of
@@ -199,10 +204,10 @@ def would_close_tree(master_config, step_name):
   # steps/optional controls if step-absence indicates failure.
   # this function assumes the step is present and failing
   # and thus doesn't care between these 4 types:
-  closing_steps = set(master_config.get('forgiving_steps', []) +
-    master_config.get('forgiving_optional', []) +
-    master_config.get('closing_steps', []) + 
-    master_config.get('closing_optional', []))
+  closing_steps = (builder_config.get('forgiving_steps', set()) |
+    builder_config.get('forgiving_optional', set()) |
+    builder_config.get('closing_steps', set()) |
+    builder_config.get('closing_optional', set()))
 
   # A '*' in any of the above types means it applies to all steps.
   if '*' in closing_steps:
@@ -210,6 +215,8 @@ def would_close_tree(master_config, step_name):
 
   if step_name in closing_steps:
     return True
+
+  log.debug('%s was not found in closing_steps: %s' % (step_name, closing_steps))
   return False
 
 
@@ -235,7 +242,7 @@ def alerts_for_builder(master_config, master_url, builder_name):
     if step['name'] in IGNORED_STEPS:
       continue
 
-    would_close = would_close_tree(master_config, step['name'])
+    would_close = would_close_tree(master_config, builder_name, step['name'])
 
     pieces = None
     splitter = next((splitter for splitter in reasons.STEP_SPLITTERS if splitter.handles_step(step)), None)
@@ -308,7 +315,7 @@ def main(args):
 
   # Find the list of failing steps?
   # Walk backwards until no failure.
-  # 
+  #
 
   # Find the list of bots who's most recent build had a compile failure.
   # Walk backwards until it didn't.

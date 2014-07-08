@@ -88,7 +88,7 @@ class GTestSplitter(object):
     # FIXME: Android gtests are also named with org.chromium prefixes which
     # confuses GTestLogParser.
 
-    log.debug('Found %s failed tests: %s' % len(failed_tests))
+    log.debug('Found %s failed tests.' % len(failed_tests))
 
     if failed_tests:
       return failed_tests
