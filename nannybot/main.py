@@ -51,13 +51,24 @@ class IgnoreHandler(webapp2.RequestHandler):
         ignore.put()
         self.get()
 
-
-def group_by_reason(alerts):
+def make_reason_groups(alerts):
     by_reason = collections.defaultdict(list)
     for alert in alerts:
         # FIXME: Probably want something smarter here.
-        reason_key = '%s:%s' % (alert['step_name'], alert['piece'])
+        reason_key = alert['step_name']
+        if alert['piece']:
+            reason_key += ':%s' % alert['piece']
         by_reason[reason_key].append(alert)
+
+    groups = []
+    for reason_key, alerts in by_reason.items():
+        groups.append({
+            'reason_key': reason_key,
+            # FIXME: These should probably be a list of keys
+            # once alerts have keys.
+            'failures': alerts,
+        })
+    return groups
 
 
 class DataHandler(webapp2.RequestHandler):
@@ -76,7 +87,7 @@ class DataHandler(webapp2.RequestHandler):
                 'date': entries[0].date,
                 'content': map(add_ignores, alerts),
                 'ignores': map(IgnoreRule.dict_with_key, ignores),
-                'by_reason': group_by_reason(alerts)
+                'reason_groups': make_reason_groups(alerts)
             }
         self.response.write(json.dumps(response_json, cls=DateTimeEncoder))
 

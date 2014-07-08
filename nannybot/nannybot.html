@@ -107,8 +107,26 @@
   </script>
 </polymer-element>
 
-<polymer-element name='nb-grouped-alert-list' attributes='failures' noscript>
+<polymer-element name='nb-grouped-alert-list' attributes='groups' noscript>
 <template>
+  <table>
+  <tr><th>reason</th><th>builders</th></tr>
+  <template repeat="{{ group in groups }}">
+    <tr>
+      <td>
+        {{ group.failures[0].step_name }}
+        <template if='{{group.failures[0].piece}}'>
+          {{ group.failures[0].piece }}
+        </template>
+      </td>
+      <td>
+        <template repeat="{{ failure in group.failures }}">
+          {{ failure.builder_name }}
+        </template>
+      </td>
+    </tr>
+  </template>
+  </table>
 </template>
 </polymer-element>
 
@@ -138,12 +156,13 @@ Polymer('nb-ignores-list', {
 
 <polymer-element name="nb-main" attributes='failures filteredFailures displayedFailures'>
 <template>
+<div>This is a debugging view for building a global-failures datastream (<a href='/data'>/data</a>) off of which we can build tools to automatically maintain Chromium bots.  <a href='https://github.com/eseidel/cycletimes/tree/master/nannybot'>Source<a></div>
 <div>
 Updated: {{ response.date | since_string }},
 {{ displayedFailures.length }} failures ({{ failures.length - displayedFailures.length }} ignored)
 </div>
 <nb-alert-list failures='{{displayedFailures}}'></nb-alert-list>
-<nb-grouped-alert-list failures='{{displayedFailures}}'></nb-alert-list>
+<nb-grouped-alert-list groups='{{grouped_alerts}}'></nb-grouped-alert-list>
 <nb-ignores-list ignores='{{response.ignores}}'></nb-ignores-list>
 <core-ajax url="/data" id='loader' auto handleAs="json" response="{{ response }}"></core-ajax>
 </template>
@@ -161,6 +180,8 @@ Polymer('nb-main', {
     this.filteredFailures = this.failures.filter(function(failure) { return !failure.ignored_by.length });
     // Could have a check-box to toggle these.
     this.displayedFailures = this.filteredFailures;
+    this.grouped_alerts = newValue.reason_groups;
+    this.grouped_alerts.sort(function(a, b) { return a.reason_key.localeCompare(b.reason_key); })
   },
   since_string: function(value) {
     // Buildbot talks to us in seconds, js expect milliseconds
@@ -169,11 +190,6 @@ Polymer('nb-main', {
   },
 });
 </script>
-</polymer-element>
-
-<polymer-element name="nb-ignore-button" noscript attributes='pattern'>
-<template>
-</template>
 </polymer-element>
 
 <nb-main></nb-main>
