@@ -59,6 +59,7 @@ class DataHandler(webapp2.RequestHandler):
         response_json = {}
         if entries:
             alerts = json.loads(entries[0].content)
+            alerts = analysis.assign_keys(alerts)
             ignores = IgnoreRule.query().fetch()
 
             def add_ignores(alert):
@@ -66,12 +67,12 @@ class DataHandler(webapp2.RequestHandler):
                 return alert
 
             reason_groups = analysis.group_by_reason(alerts)
-            # range_groups = analysis.merge_by_range(reason_groups)
+            range_groups = analysis.merge_by_range(reason_groups)
             response_json = {
                 'date': entries[0].date,
                 'content': map(add_ignores, alerts),
                 'ignores': map(IgnoreRule.dict_with_key, ignores),
-                'reason_groups': reason_groups,
+                'reason_groups': range_groups,
             }
         self.response.write(json.dumps(response_json, cls=DateTimeEncoder, indent=1))
 

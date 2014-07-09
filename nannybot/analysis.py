@@ -43,6 +43,13 @@ def lookup_and_compare(existing, new, compare):
         return new
     return existing
 
+# FIXME: Perhaps this should be done by the feeder?
+def assign_keys(alerts):
+    for key, alert in enumerate(alerts):
+        # We could come up with something more sophisticated if necessary.
+        alert['key'] = 'f%s' % key # Just something so it doesn't look like a number.
+    return alerts
+
 
 # FIXME: Perhaps this would be cleaner as:
 # passing = find_maximal(alert, 'passing_revisions', is_ancestor_of)
@@ -83,7 +90,7 @@ def group_by_reason(alerts):
             'likely_revisions': blame_list,
             # FIXME: These should probably be a list of keys
             # once alerts have keys.
-            'failures': alerts,
+            'failure_keys': map(operator.itemgetter('key'), alerts),
         })
     return reason_groups
 
@@ -105,10 +112,7 @@ def longestSubstringFinder(string1, string2):
 def merge_by_range(reason_groups):
     by_range = {}
     for group in reason_groups:
-        # FIXME: We could remove the step_name restriction.
-        # It's possible for a single commit to cause a variety of steps to fail.
-        step_name = group['failures'][0]['step_name']
-        range_key = step_name + ' '.join(group['likely_revisions'])
+        range_key = ' '.join(sorted(group['likely_revisions']))
         existing = by_range.get(range_key)
         if not existing:
             by_range[range_key] = group
@@ -117,7 +121,7 @@ def merge_by_range(reason_groups):
         by_range[range_key] = {
             'sort_key': longestSubstringFinder(existing['sort_key'], group['sort_key']),
             'likely_revisions': existing['likely_revisions'],
-            'failures': existing['failures'] + group['failures'],
+            'failure_keys': sorted(set(existing['failure_keys'] + group['failure_keys'])),
         }
 
     return sorted(by_range.values(), key=operator.itemgetter('sort_key'))
