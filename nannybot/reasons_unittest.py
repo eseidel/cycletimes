@@ -10,8 +10,9 @@ class JUnitSplitterTest(unittest.TestCase):
     def test_failed_tests_from_stdio(self):
         splitter = reasons.JUnitSplitter()
         stdio = """
-# C  367.973s Main  [  FAILED  ] org.chromium.android_webview.test.AwContentsClientShouldOverrideUrlLoadingTest#testCalledForUnsupportedSchemes
-# C   59.798s Main  [  FAILED  ] org.chromium.mojo.system.impl.CoreImplTest#testAsyncWaiterWaitingOnDefaultInvalidHandle (CRASHED)
+C  367.973s Main  [  FAILED  ] 14 tests, listed below:
+C  367.973s Main  [  FAILED  ] org.chromium.android_webview.test.AwContentsClientShouldOverrideUrlLoadingTest#testCalledForUnsupportedSchemes
+C   59.798s Main  [  FAILED  ] org.chromium.mojo.system.impl.CoreImplTest#testAsyncWaiterWaitingOnDefaultInvalidHandle (CRASHED)
 """
         expected = [
             'org.chromium.android_webview.test.AwContentsClientShouldOverrideUrlLoadingTest#testCalledForUnsupportedSchemes',

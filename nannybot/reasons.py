@@ -99,7 +99,7 @@ class JUnitSplitter(object):
     ]
     return step['name'] in KNOWN_STEPS
 
-  FAILED_REGEXP = re.compile('\[\s+FAILED\s+\] (?P<test_name>\S+)')
+  FAILED_REGEXP = re.compile('\[\s+FAILED\s+\] (?P<test_name>\S+)( \(.*\))?$')
 
   def failed_tests_from_stdio(self, stdio):
     failed_tests = []
