@@ -120,6 +120,13 @@
         </template>
       </td>
       <td>
+        <template if="{{group.likely_revisions.length < 10}}">
+          <template repeat="{{ revision in group.likely_revisions }}">
+            {{ revision }}
+          </template>
+        </template>
+      </td>
+      <td>
         <template repeat="{{ failure in group.failures }}">
           {{ failure.builder_name }}
         </template>
