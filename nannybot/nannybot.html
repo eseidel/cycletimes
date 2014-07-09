@@ -63,7 +63,9 @@
 <polymer-element name="nb-alert-list" attributes='failures'>
   <template>
     <sortable-table id='table' data='{{failures}}' rowTemplate="rowTemplate" style='width: 100%'>
-     <template id="rowTemplate" bind="{{ (record.row.master_url + '/builders/' + record.row.builder_name) as builder_url}}">
+    <template id="rowTemplate">
+    <!-- Can't have bind on a referenced template, so we nest them. -->
+     <template bind="{{ (record.row.master_url + '/builders/' + record.row.builder_name) as builder_url}}">
         <style>
           .fail_link { background-color: #FCC;}
           .pass_link { background-color: #CFC;}
@@ -89,6 +91,7 @@
         <td>{{ record.row.last_result_time | since_string }}</td>
         <td>{{ record.row.would_close_tree }}</td>
        </template>
+      </template>
     </sortable-table>
   </template>
   <script>
