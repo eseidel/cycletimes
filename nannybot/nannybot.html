@@ -64,20 +64,18 @@
 <polymer-element name="nb-alert-list" attributes='failures'>
   <template>
     <sortable-table id='table' data='{{failures}}' rowTemplate="rowTemplate" style='width: 100%'>
-    <template id="rowTemplate">
-    <!-- Can't have bind on a referenced template, so we nest them. -->
-     <template bind="{{ (record.row.master_url + '/builders/' + record.row.builder_name) as builder_url}}">
+      <template id="rowTemplate">
         <style>
           .fail_link { background-color: #FCC;}
           .pass_link { background-color: #CFC;}
         </style>
         <td>{{record.row.master_url | master_name }}</td>
         <td style='max-width: 150px; overflow: hidden'>
-          <a href='{{builder_url}}'>{{record.row.builder_name}}</a>
+          <a href='{{ record.row | builder_url}}'>{{record.row.builder_name}}</a>
         </td>
         <td>{{record.row.failing_build_count}}</td>
         <td style='max-width: 300px; overflow: hidden; word-wrap: break-word;'>
-          <a href='{{builder_url}}/builds/{{record.row.failing_build}}/steps/{{record.row.step_name}}/logs/stdio'>{{record.row.step_name}}</a>
+          <a href='{{ record.row | stdio_url'>{{record.row.step_name}}</a>
           <br>
           <template if="{{ record.row.piece }}">
             <a href="{{ record.row.piece | flakiness_dashboard_url(record.row.step_name) }}">
@@ -86,9 +84,9 @@
           </template>
         </td>
         <td>
-          <a class='fail_link' href="{{ builder_url + '/builds/' + record.row.failing_build }}">F</a>
+          <a class='fail_link' href="{{ record.row | build_url('failing_build') }}">F</a>
           <template if='{{record.row.passing_build}}'>
-            <a class='pass_link' href="{{ builder_url + '/builds/' + record.row.passing_build }}">P</a>
+            <a class='pass_link' href="{{ record.row | build_url('failing_build') }}">P</a>
           </template>
         </td>
         <td style='max-width: 200px; overflow: hidden'>
@@ -96,7 +94,6 @@
         </td>
         <td>{{ record.row.last_result_time | since_string }}</td>
         <td>{{ record.row.would_close_tree }}</td>
-       </template>
       </template>
     </sortable-table>
   </template>
@@ -134,7 +131,7 @@
   </script>
 </polymer-element>
 
-<polymer-element name='nb-grouped-alert-list' attributes='groups'>
+<polymer-element name='nb-grouped-alert-list' attributes='failures groups'>
 <template>
   <table>
   <tr><th>reason</th><th>builders</th></tr>
@@ -143,7 +140,12 @@
       <td>
         {{ group.failures[0].step_name }}
         <template repeat="{{ piece in group.pieces }}">
-          {{ piece }}
+          <template if="{{ piece }}">
+            <!-- FIXME this will be wrong if there are multiple step names! -->
+            <a href="{{ piece | flakiness_dashboard_url(group.failures[0].step_name) }}">
+              {{piece }}
+            </a>
+          </template>
         </template>
       </td>
       <td>
@@ -157,8 +159,8 @@
         </template>
       </td>
       <td>
-        <template repeat="{{ failure in group.failures }}">
-          {{ failure.builder_name }}
+        <template repeat="{{ builder_name in group.builder_names }}">
+          {{ builder_name }}
         </template>
       </td>
     </tr>
@@ -175,12 +177,26 @@ Polymer('nb-grouped-alert-list', {
     // This is kinda hacky to modify newValue.
     newValue.forEach(function(group) {
       var pieces = {};
-      group.failures.forEach(function(failure) {
-        pieces[failure.piece] = 1;
-      });
+      var builder_names = {};
+      group.failures = []
+      group.failure_keys.forEach(function(failure_key) {
+        var failure = this.failureForKey(failure_key);
+        group.failures.push(failure);
+        if (failure.piece)
+          pieces[failure.piece] = 1;
+        builder_names[failure.builder_name] = 1;
+      }, this);
       group.pieces = Object.keys(pieces);
-    });
+      group.builder_names = Object.keys(builder_names);
+    }, this);
   },
+  failureForKey: function(key) {
+    for (var x = 0; x < this.failures.length; x++) {
+      var failure = this.failures[x];
+      if (failure.key == key)
+        return failure
+    }
+  }
 });
 </script>
 </polymer-element>
@@ -209,7 +225,7 @@ Updated: {{ response.date | since_string }},
 <h3>All failures</h3>
 <nb-alert-list failures='{{displayedFailures}}'></nb-alert-list>
 <h3>Failures grouped by reason</h3>
-<nb-grouped-alert-list groups='{{grouped_alerts}}'></nb-grouped-alert-list>
+<nb-grouped-alert-list groups='{{grouped_alerts}}' failures='{{failures}}'></nb-grouped-alert-list>
 <h3>Ignore Rules</h3>
 <nb-ignores-list ignores='{{response.ignores}}'></nb-ignores-list>
 <core-ajax url="/data" id='loader' auto handleAs="json" response="{{ response }}"></core-ajax>
@@ -254,6 +270,18 @@ Polymer('nb-main', {
       return long_name.slice('chromium.'.length);
     }
     return long_name;
+  }
+  PolymerExpressions.prototype.builder_url = function(failure) {
+    return failure.master_url + '/builders/' + failure.builder_name;
+  }
+  PolymerExpressions.prototype.build_url = function(failure, build_number) {
+    return PolymerExpressions.prototype.builder_url(failure) + '/builds/' + build_number;
+  }
+  PolymerExpressions.prototype.step_url = function(failure, build_number) {
+    return PolymerExpressions.prototype.build_url(failure) + '/steps/' + failure.step_name;
+  }
+  PolymerExpressions.prototype.stdio_url = function(failure, build_number) {
+    return PolymerExpressions.prototype.step_url(failure, build_number) + '/logs/stdio';
   }
   PolymerExpressions.prototype.flakiness_dashboard_url = function(test_name, step_name) {
     if (!test_name)
