@@ -78,7 +78,12 @@
         <td>{{record.row.failing_build_count}}</td>
         <td style='max-width: 300px; overflow: hidden; word-wrap: break-word;'>
           <a href='{{builder_url}}/builds/{{record.row.failing_build}}/steps/{{record.row.step_name}}/logs/stdio'>{{record.row.step_name}}</a>
-          <div>{{record.row.piece | falsy_to_empty}}</div>
+          <br>
+          <template if="{{ record.row.piece }}">
+            <a href="{{ record.row.piece | flakiness_dashboard_url(record.row.step_name) }}">
+              {{record.row.piece }}
+            </a>
+          </template>
         </td>
         <td>
           <a class='fail_link' href="{{ builder_url + '/builds/' + record.row.failing_build }}">F</a>
@@ -218,6 +223,13 @@ Polymer('nb-main', {
       return long_name.slice('chromium.'.length);
     }
     return long_name;
+  }
+  PolymerExpressions.prototype.flakiness_dashboard_url = function(test_name, step_name) {
+    if (!test_name)
+      return '';
+    if (step_name.indexOf('test') == -1)
+      return '';
+    return "http://test-results.appspot.com/dashboards/flakiness_dashboard.html#tests=" + encodeURIComponent(test_name);
   }
 </script>
 <nb-main></nb-main>
