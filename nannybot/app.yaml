@@ -14,3 +14,14 @@ handlers:
   static_dir: scripts
 - url: /.*
   script: main.app
+
+skip_files:
+- ^(.*/)?#.*#$
+- ^(.*/)?.*~$
+- ^(.*/)?.*\.py[co]$
+- ^(.*/)?.*/RCS/.*$
+- ^(.*/)?\..*$
+- ^(.*/)?.*\.md$
+- ^(.*/)?LICENSE$
+- ^(.*/)?README$
+- ^(.*/)?Makefile$
