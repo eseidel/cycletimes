@@ -18,6 +18,7 @@
   <link rel="import" href="components/polymer/polymer.html">
   <link rel="import" href="components/core-ajax/core-ajax.html">
   <link rel="import" href="components/sortable-table/sortable-table.html">
+  <link rel="shortcut icon" href="/favicon.ico">
 </head>
 
 <body unresolved touch-action="auto">
@@ -112,7 +113,7 @@
   </script>
 </polymer-element>
 
-<polymer-element name='nb-grouped-alert-list' attributes='groups' noscript>
+<polymer-element name='nb-grouped-alert-list' attributes='groups'>
 <template>
   <table>
   <tr><th>reason</th><th>builders</th></tr>
@@ -127,7 +128,7 @@
       <td>
         <template if="{{group.likely_revisions.length < 10}}">
           <template repeat="{{ revision in group.likely_revisions }}">
-            {{ revision }}
+            <a href="{{ revision | change_url }}">{{ revision }}</a>
           </template>
         </template>
       </td>
@@ -140,9 +141,17 @@
   </template>
   </table>
 </template>
+<script>
+Polymer('nb-grouped-alert-list', {
+  change_url: function(value) {
+    var args = value.split(':');
+    return repositories.change_url(args[0], args[1]);
+  },
+});
+</script>
 </polymer-element>
 
-<polymer-element name="nb-ignores-list" attributes='ignores'>
+<polymer-element name="nb-ignores-list" attributes='ignores' noscript>
 <template>
     <h3>Ignore Rules</h3>
     <table>
@@ -213,11 +222,11 @@ Polymer('nb-main', {
 </script>
 <nb-main></nb-main>
 
-<!-- <form action='/ignore' method='post'>
+<form action='/ignore' method='post'>
 <core-field>
   <label>Pattern:</label><input name='pattern'>
 </core-field>
 <input type='submit'>
-</form> -->
+</form>
 </body>
 </html>
