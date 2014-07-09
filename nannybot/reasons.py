@@ -90,15 +90,24 @@ class GTestSplitter(object):
 # Our Android tests produce very gtest-like output, but not
 # quite GTestLogParser-compatible (it parse the name of the
 # test as org.chromium).
-# C  367.973s Main  [  FAILED  ] org.chromium.android_webview.test.AwContentsClientShouldOverrideUrlLoadingTest#testCalledForUnsupportedSchemes
+
 class JUnitSplitter(object):
   def handles_step(self, step):
     KNOWN_STEPS = [
       'androidwebview_instrumentation_tests',
+      'mojotest_instrumentation_tests', # Are these always java?
     ]
     return step['name'] in KNOWN_STEPS
 
-  FAILED_REGEXP = re.compile('\[\s+FAILED\s+\] (?P<test_name>\S+)$')
+  FAILED_REGEXP = re.compile('\[\s+FAILED\s+\] (?P<test_name>\S+)')
+
+  def failed_tests_from_stdio(self, stdio):
+    failed_tests = []
+    for line in stdio.split('\n'):
+      match = self.FAILED_REGEXP.search(line)
+      if match:
+        failed_tests.append(match.group('test_name'))
+    return failed_tests
 
   def split_step(self, step, build, builder_name, master_url):
     stdio_log = stdio_for_step(master_url, builder_name, build, step)
@@ -106,12 +115,7 @@ class JUnitSplitter(object):
     if not stdio_log:
       return None
 
-    failed_tests = []
-    for line in stdio_log.split('\n'):
-      match = self.FAILED_REGEXP.search(line)
-      if match:
-        failed_tests.append(match.group('test_name'))
-
+    failed_tests = failed_tests_from_stdio(stdio_log)
     log.debug('Found %s failed tests.' % len(failed_tests))
 
     if failed_tests:
