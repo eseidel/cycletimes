@@ -28,7 +28,7 @@
     <template if="{{passing}}">
       <template repeat="{{ name in revision_names }}">
         <template if="{{name | commits_differ(passing, failing) }}">
-          <a href='name | changelog_url(passing, failing)' title='{{ name | commit_id(passing) }}:{{ name | commit_id(failing)}}'>{{ name | short_name }}</a>
+          <a href='{{ name | changelog_url(passing, failing) }}' title='{{ name | commit_id(passing) }}:{{ name | commit_id(failing)}}'>{{ name | short_name }}</a>
         </template>
       </template>
     </template>
