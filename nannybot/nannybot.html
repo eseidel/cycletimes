@@ -113,6 +113,22 @@
         { title: 'since', name: 'last_result_time' },
         { title: 'closer', name: 'would_close_tree' },
       ];
+      this.$.table.sortColumn = this.getQueryParameter('sortColumn');
+      this.$.table.sortDescending = this.getQueryParameter('sortDescending');
+    },
+    getQueryParameter: function(name) {
+      name = name.replace(/[\[]/, "\\[").replace(/[\]]/, "\\]");
+      var regex = new RegExp("[\\?&]" + name + "=([^&#]*)");
+      var results = regex.exec(window.location.search);
+      console.log(results);
+      return results == null ? "" : decodeURIComponent(results[1].replace(/\+/g, " "));
+    },
+    observe: {
+    '$.table.sortColumn': 'sortColumnChanged'
+    },
+    sortColumnChanged: function(oldValue, newValue) {
+      // FIXME: Save the sort column in the url.
+      console.log(newValue);
     }
   });
   </script>
