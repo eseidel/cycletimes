@@ -49,7 +49,7 @@ class IgnoreHandler(webapp2.RequestHandler):
         ignore = IgnoreRule()
         ignore.pattern = self.request.get('pattern')
         ignore.put()
-        self.get()
+        self.redirect('/')
 
 
 # Git ready, but only implemented for SVN atm.
