@@ -62,7 +62,7 @@
 
 <polymer-element name="nb-alert-list" attributes='failures'>
   <template>
-    <sortable-table id='table' data='{{failures}}' rowTemplate="rowTemplate">
+    <sortable-table id='table' data='{{failures}}' rowTemplate="rowTemplate" style='width: 100%'>
      <template id="rowTemplate" bind="{{ (record.row.master_url + '/builders/' + record.row.builder_name) as builder_url}}">
         <style>
           .fail_link { background-color: #FCC;}
