@@ -6,7 +6,7 @@ var registry = [
   {
     'name': 'chromium',
     'short_name': 'cr',
-    'change_url': 'http://crrev.com/',
+    'change_url': 'http://crrev.com/%s',
     'changelog_url': 'http://build.chromium.org/f/chromium/perf/dashboard/ui/changelog.html?url=/trunk&range=%s:%s',
   },
   {
