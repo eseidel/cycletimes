@@ -158,7 +158,6 @@ Polymer('nb-grouped-alert-list', {
 
 <polymer-element name="nb-ignores-list" attributes='ignores' noscript>
 <template>
-    <h3>Ignore Rules</h3>
     <table>
     <tr><th>pattern</th><th>added</th></tr>
     <template repeat="{{ ignore in ignores }}">
@@ -178,8 +177,11 @@ Polymer('nb-grouped-alert-list', {
 Updated: {{ response.date | since_string }},
 {{ displayedFailures.length }} failures ({{ failures.length - displayedFailures.length }} ignored)
 </div>
+<h3>All failures</h3>
 <nb-alert-list failures='{{displayedFailures}}'></nb-alert-list>
+<h3>Failures grouped by reason</h3>
 <nb-grouped-alert-list groups='{{grouped_alerts}}'></nb-grouped-alert-list>
+<h3>Ignore Rules</h3>
 <nb-ignores-list ignores='{{response.ignores}}'></nb-ignores-list>
 <core-ajax url="/data" id='loader' auto handleAs="json" response="{{ response }}"></core-ajax>
 </template>
@@ -229,7 +231,7 @@ Polymer('nb-main', {
       return '';
     if (step_name.indexOf('test') == -1)
       return '';
-    return "http://test-results.appspot.com/dashboards/flakiness_dashboard.html#tests=" + encodeURIComponent(test_name);
+    return "http://test-results.appspot.com/dashboards/flakiness_dashboard.html#testType=" + step_name + "&tests=" + encodeURIComponent(test_name);
   }
 </script>
 <nb-main></nb-main>
