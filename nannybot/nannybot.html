@@ -142,8 +142,8 @@
     <tr>
       <td>
         {{ group.failures[0].step_name }}
-        <template if='{{group.failures[0].piece}}'>
-          {{ group.failures[0].piece }}
+        <template repeat="{{ piece in group.pieces }}">
+          {{ piece }}
         </template>
       </td>
       <td>
@@ -151,6 +151,9 @@
           <template repeat="{{ revision in group.likely_revisions }}">
             <a href="{{ revision | change_url }}">{{ revision }}</a>
           </template>
+        </template>
+        <template if="{{ group.likely_revisions.length >= 10 }}">
+        {{ group.likely_revisions.length }}
         </template>
       </td>
       <td>
@@ -167,6 +170,16 @@ Polymer('nb-grouped-alert-list', {
   change_url: function(value) {
     var args = value.split(':');
     return repositories.change_url(args[0], args[1]);
+  },
+  groupsChanged: function(oldValue, newValue) {
+    // This is kinda hacky to modify newValue.
+    newValue.forEach(function(group) {
+      var pieces = {};
+      group.failures.forEach(function(failure) {
+        pieces[failure.piece] = 1;
+      });
+      group.pieces = Object.keys(pieces);
+    });
   },
 });
 </script>
@@ -216,7 +229,7 @@ Polymer('nb-main', {
     // Could have a check-box to toggle these.
     this.displayedFailures = this.filteredFailures;
     this.grouped_alerts = newValue.reason_groups;
-    this.grouped_alerts.sort(function(a, b) { return a.reason_key.localeCompare(b.reason_key); })
+    this.grouped_alerts.sort(function(a, b) { return a.sort_key.localeCompare(b.sort_key); })
   },
 });
 </script>
