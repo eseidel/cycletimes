@@ -51,21 +51,18 @@
 
 <polymer-element name="nb-alert-list" attributes='failures'>
   <template>
-    <style>
-      :host {
-        display: block;
-      }
-      .fail_link { background-color: #FCC;}
-      .pass_link { background-color: #CFC;}
-    </style>
     <sortable-table id='table' data='{{failures}}' rowTemplate="rowTemplate">
      <template id="rowTemplate" bind="{{ (record.row.master_url + '/builders/' + record.row.builder_name) as builder_url}}">
+        <style>
+          .fail_link { background-color: #FCC;}
+          .pass_link { background-color: #CFC;}
+        </style>
         <td>{{record.row.master_url | master_name }}</td>
         <td style='max-width: 200px; overflow: hidden'>
           <a href='{{builder_url}}'>{{record.row.builder_name}}</a>
         </td>
         <td>{{record.row.failing_build_count}}</td>
-        <td style='max-width: 300px; overflow: hidden'>
+        <td style='max-width: 300px; overflow: hidden; word-wrap: break-word;'>
           <a href='{{builder_url}}/builds/{{record.row.failing_build}}/steps/{{record.row.step_name}}/logs/stdio'>{{record.row.step_name}}</a>
           <div>{{record.row.piece | falsy_to_empty}}</div>
         </td>
@@ -93,7 +90,7 @@
         { title: 'failure', name: 'piece' },
         { title: 'edges', name: 'failing_build' }, // bad sort criteria.
         { title: 'changelogs', name: 'failing_revisions' }, // also bad.
-        { title: 'blame', name: 'last_result_time' },
+        { title: 'since', name: 'last_result_time' },
         { title: 'closer', name: 'would_close_tree' },
       ];
     }
