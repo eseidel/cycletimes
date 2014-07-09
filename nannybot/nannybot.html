@@ -22,31 +22,42 @@
 
 <body unresolved touch-action="auto">
 
-<!-- FIXME: This should probably just be done via script. -->
-<polymer-element name="nb-changelogs" attributes="passing failing" noscript>
+<polymer-element name="nb-changelogs" attributes="revision_names passing failing">
   <template>
     <template if="{{passing}}">
-      <template if="{{passing.chromium != failing.chromium}}">
-        <a href='http://build.chromium.org/f/chromium/perf/dashboard/ui/changelog.html?url=/trunk&range={{ passing.chromium }}:{{failing.chromium}}'>Cr</a>
-      </template>
-      <template if="{{passing.blink != failing.blink}}">
-        <a href='http://build.chromium.org/f/chromium/perf/dashboard/ui/changelog_blink.html?url=/trunk&range={{ passing.blink }}:{{failing.blink}}'>Bl</a>
-      </template>
-      <template if="{{passing.v8 != failing.v8}}">
-        <a href='http://build.chromium.org/f/chromium/perf/dashboard/ui/changelog_v8.html?url=/trunk&range={{ passing.v8 }}:{{failing.v8}}'>v8</a>
-      </template>
-      <template if="{{passing.nacl != failing.nacl}}">
-        nacl ({{ passing.nacl }}:{{ failing.nacl }})
+      <template repeat="{{ name in revision_names }}">
+        <template if="{{name | commits_differ(passing, failing) }}">
+          <a href='name | changelog_url(passing, failing)' title='{{ name | commit_id(passing) }}:{{ name | commit_id(failing)}}'>{{ name | short_name }}</a>
+        </template>
       </template>
     </template>
     <template if="{{ !passing }}">
-     Before:
-     <a>Cr {{failing.chromium}} </a>
-     <a>Bl {{failing.blink}} </a>
-     <a>v8 {{failing.v8}} </a>
-     <a>nacl {{failing.nacl}} </a>
+     before
+      <template repeat="{{ name in revision_names }}">
+        <a href="{{ name | change_url(failing) }}">{{ name | short_name }}</a>
+      </template>
     </template>
   </template>
+  <script>
+  Polymer('nb-changelogs', {
+    failingChanged: function() {
+      this.revision_names = Object.keys(this.failing);
+    },
+    commits_differ: function(name, passing, failing) {
+      return passing[name] != failing[name];
+    },
+    changelog_url: function(name, passing, failing) {
+      return repositories.changelog_url(name, passing[name], failing[name]);
+    },
+    commit_id: function(name, revisions_dict) {
+      return revisions_dict[name];
+    },
+    change_url: function(name, revisions_dict) {
+      return repositories.change_url(name, revisions_dict[name]);
+    },
+    short_name: repositories.short_name,
+  });
+  </script>
 </polymer-element>
 
 <polymer-element name="nb-alert-list" attributes='failures'>
@@ -58,7 +69,7 @@
           .pass_link { background-color: #CFC;}
         </style>
         <td>{{record.row.master_url | master_name }}</td>
-        <td style='max-width: 200px; overflow: hidden'>
+        <td style='max-width: 150px; overflow: hidden'>
           <a href='{{builder_url}}'>{{record.row.builder_name}}</a>
         </td>
         <td>{{record.row.failing_build_count}}</td>
