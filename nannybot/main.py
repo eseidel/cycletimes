@@ -54,7 +54,13 @@ class IgnoreHandler(webapp2.RequestHandler):
 
 # Git ready, but only implemented for SVN atm.
 def ids_after_first_including_second(first, second):
-    return range(int(first) + 1, int(second) + 1)
+    if not first or not second:
+        return []
+    try:
+        return range(int(first) + 1, int(second) + 1)
+    except ValueError, e:
+        # likely passed a git hash
+        return []
 
 
 # Git ready, but only implemented for SVN atm.
