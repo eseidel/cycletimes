@@ -12,8 +12,12 @@ handlers:
   static_dir: bower_components
 - url: /scripts
   static_dir: scripts
+- url: /favicon.ico
+  static_files: favicon.ico
+  upload: favicon.ico
 - url: /.*
   script: main.app
+
 
 skip_files:
 - ^(.*/)?#.*#$
