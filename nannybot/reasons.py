@@ -115,7 +115,7 @@ class JUnitSplitter(object):
     if not stdio_log:
       return None
 
-    failed_tests = failed_tests_from_stdio(stdio_log)
+    failed_tests = self.failed_tests_from_stdio(stdio_log)
     log.debug('Found %s failed tests.' % len(failed_tests))
 
     if failed_tests:
