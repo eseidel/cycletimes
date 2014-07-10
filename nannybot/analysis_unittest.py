@@ -117,6 +117,7 @@ class FailureAnalysisTest(unittest.TestCase):
         merged = analysis.merge_by_range(groups)
         self.assertEquals(len(merged), 1)
         self.assertEquals(merged[0]['sort_key'], 'dromaeo.')
+        self.assertEquals(analysis.merge_by_range([]), [])
 
 
 if __name__ == '__main__':

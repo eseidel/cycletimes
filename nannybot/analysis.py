@@ -151,6 +151,8 @@ def range_key_for_group(group):
 
 
 def merge_by_range(reason_groups):
+    if not reason_groups:
+        return []
     expected_keys = sorted(reason_groups[0].keys())
     by_range = {}
     for group in reason_groups:
