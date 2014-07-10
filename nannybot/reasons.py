@@ -72,6 +72,9 @@ class GTestSplitter(object):
     if not stdio_log:
       return None
 
+    # Lines this fails for:
+    #[  FAILED  ] ExtensionApiTest.TabUpdate, where TypeParam =  and GetParam() =  (10907 ms)
+
     log_parser = gtest_utils.GTestLogParser()
     for line in stdio_log.split('\n'):
       log_parser.ProcessLine(line)
@@ -83,7 +86,6 @@ class GTestSplitter(object):
       return failed_tests
     # Failed to split, just group with the general failures.
     log.debug('First Line: %s' % stdio_log.split('\n')[0])
-    log.debug('Passed tests: %s' % log_parser.PassedTests())
     return None
 
 
