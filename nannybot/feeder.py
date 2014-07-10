@@ -102,12 +102,12 @@ def master_name_from_url(master_url):
   return urlparse.urlparse(master_url).path.split('/')[-1]
 
 
-def fetch_builder_names(master_url):
+def fetch_master_json(master_url):
   url = BUILDERS_URL % master_name_from_url(master_url)
   request = requests.get(url)
   if request.elapsed.total_seconds() > 1:
     log.debug('Slow: %0.1fs %s' % (request.elapsed.total_seconds(), request.url))
-  return request.json()['builders']
+  return request.json()
 
 
 def builds_for_builder(master_url, builder_name):
@@ -163,7 +163,7 @@ def re_range(lst):
 
 
 def compute_transition_and_failure_count(recent_builds, step_name, splitter,
-    piece, build, builder_name, master_url):
+    reason, build, builder_name, master_url):
   '''Returns last_pass_build, first_fail_build, fail_count'''
   first_fail = recent_builds[0]
   last_pass = None
@@ -182,15 +182,15 @@ def compute_transition_and_failure_count(recent_builds, step_name, splitter,
     step = matching_steps[0]
     step_result = step['results'][0]
     if step_result not in NON_FAILING_RESULTS:
-      if splitter and piece:
-        pieces = splitter.split_step(step, build, builder_name, master_url)
+      if splitter and reason:
+        reasons = splitter.split_step(step, build, builder_name, master_url)
         # This build doesn't seem to have this step reason, ignore it.
-        if not pieces:
+        if not reasons:
           continue
-        # Failed, but passed our piece!
+        # Failed, but our failure reason wasn't present!
         # FIXME: This is wrong for compile failures, and possibly
         # for test failures as well if not all tests are run...
-        if piece not in pieces:
+        if reason not in reasons:
           break
 
       first_fail = build
@@ -251,9 +251,26 @@ def would_close_tree(master_config, builder_name, step_name):
   log.debug('%s not in closing_steps: %s' % (step_name, closing_steps))
   return False
 
+def failing_steps_for_build(build):
+  failing_steps = [step for step in build['steps'] if step['results'][0] not in NON_FAILING_RESULTS]
 
-def alerts_for_builder(master_config, master_url, builder_name):
+  # Some builders use a sub-step pattern which just generates noise.
+  # FIXME: This code shouldn't contain constants like these.
+  IGNORED_STEPS = ['steps', 'trigger', 'slave_steps']
+  return [step for step in failing_steps if step['name'] not in IGNORED_STEPS]
+
+
+def splitter_and_reasons_for_failure(step, build, builder_name, master_url):
+    splitter = next((splitter for splitter in reasons.STEP_SPLITTERS if splitter.handles_step(step)), None)
+    if not splitter:
+      return None, None
+    return splitter, splitter.split_step(step, build, builder_name, master_url)
+
+# FIXME: This method is way too long and needs refactor.
+def alerts_for_builder(master_config, master_url, builder_name, active_builds):
   alerts = []
+  active_builds = filter(lambda build: build['builderName'] == builder_name, active_builds)
+
   recent_builds = builds_for_builder(master_url, builder_name)
   if not recent_builds:
     log.warn("No recent builds for %s, skipping." % builder_name)
@@ -264,57 +281,57 @@ def alerts_for_builder(master_config, master_url, builder_name):
   if build.get('results', 0) == 0:
     return alerts
 
-  failing_steps = [step for step in build['steps'] if step['results'][0] not in NON_FAILING_RESULTS]
-
-  # Some builders use a sub-step pattern which just generates noise.
-  # FIXME: This code shouldn't contain constants like these.
-  IGNORED_STEPS = ['steps', 'trigger', 'slave_steps']
-
-  for step in failing_steps:
-    if step['name'] in IGNORED_STEPS:
-      continue
-
+  for step in failing_steps_for_build(build):
     would_close = would_close_tree(master_config, builder_name, step['name'])
+    step_template = {
+      'master_url': master_url,
+      'last_result_time': step['times'][1],
+      'builder_name': builder_name,
+      'step_name': step['name'],
+      'would_close_tree': would_close,
+    }
 
-    pieces = None
-    splitter = next((splitter for splitter in reasons.STEP_SPLITTERS if splitter.handles_step(step)), None)
-    if splitter:
-      pieces = splitter.split_step(step, build, builder_name, master_url)
+    splitter, reasons = splitter_and_reasons_for_failure(step, build, builder_name, master_url)
 
-    if not pieces:
-      pieces = [None] # FIXME: Lame hack.
+    if not reasons:
+      reasons = [None] # FIXME: Hack to always enter the loop.
 
-    for piece in pieces:
+    for reason in reasons:
       last_pass_build, first_fail_build, fail_count = \
         compute_transition_and_failure_count(recent_builds, step['name'],
-          splitter, piece, build, builder_name, master_url)
+          splitter, reason, build, builder_name, master_url)
 
       failing = revisions_from_build(first_fail_build)
       passing = revisions_from_build(last_pass_build) if last_pass_build else None
 
-      alerts.append({
-        'master_url': master_url,
-        'last_result_time': step['times'][1],
-        'builder_name': builder_name,
-        'step_name': step['name'],
+      alert = dict(step_template)
+      alert.update({
+        'piece': reason,
         'failing_build_count': fail_count,
         'passing_build': last_pass_build['number'] if last_pass_build else None,
         'failing_build': first_fail_build['number'],
         'failing_revisions': failing,
         'passing_revisions': passing,
-        'piece': piece,
-        'would_close_tree': would_close,
       })
+      alerts.append(alert)
   return alerts
 
 def alerts_for_master(master_url, master_config):
-  builder_names = fetch_builder_names(master_url)
+  master_json = fetch_master_json(master_url)
+
+  builder_names = master_json['builders']
   builder_names = sorted(set(builder_names) - excluded_builders(master_config))
+
+  active_builds = []
+  for slave in master_json['slaves'].values():
+    for build in slave['runningBuilds']:
+      active_builds.append(build)
+
   alerts = []
   for builder_name in builder_names:
     master_name = master_name_from_url(master_url)
     log.debug("%s %s" % (master_name, builder_name))
-    alerts.extend(alerts_for_builder(master_config, master_url, builder_name))
+    alerts.extend(alerts_for_builder(master_config, master_url, builder_name, active_builds))
   return alerts
 
 
