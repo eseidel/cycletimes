@@ -94,6 +94,9 @@ def reason_key_for_alert(alert):
     reason_key = alert['step_name']
     if alert['piece']:
         reason_key += ':%s' % alert['piece']
+    else:
+        # If we don't understand the alert, just make it builder-unique.
+        reason_key += ':%s' % alert['builder_name']
     return reason_key
 
 
