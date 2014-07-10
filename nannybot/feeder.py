@@ -5,6 +5,7 @@
 
 import argparse
 import collections
+import itertools
 import json
 import logging
 import operator
@@ -103,13 +104,19 @@ def master_name_from_url(master_url):
 
 def fetch_builder_names(master_url):
   url = BUILDERS_URL % master_name_from_url(master_url)
-  return requests.get(url).json()['builders']
+  request = requests.get(url)
+  if request.elapsed.total_seconds() > 1:
+    log.debug('Slow: %0.1fs %s' % (request.elapsed.total_seconds(), request.url))
+  return request.json()['builders']
 
 
 def builds_for_builder(master_url, builder_name):
   master_name = master_name_from_url(master_url)
   params = { 'master': master_name, 'builder': builder_name }
-  return requests.get(BUILDS_URL, params=params).json()['builds']
+  request = requests.get(BUILDS_URL, params=params)
+  if request.elapsed.total_seconds() > 1:
+    log.warn('Slow: %0.1fs %s' % (request.elapsed.total_seconds(), request.url))
+  return request.json()['builds']
 
 
 # FIXME: This belongs in gatekeeper_ng_config.py
@@ -139,17 +146,35 @@ def revisions_from_build(build_json):
   return revisions
 
 
+# http://stackoverflow.com/questions/9470611/how-to-do-an-inverse-range-i-e-create-a-compact-range-based-on-a-set-of-numb/9471386#9471386
+def re_range(lst):
+    def sub(x):
+        return x[1] - x[0]
+
+    ranges = []
+    for k, iterable in itertools.groupby(enumerate(sorted(lst)), sub):
+         rng = list(iterable)
+         if len(rng) == 1:
+             s = str(rng[0][1])
+         else:
+             s = "%s-%s" % (rng[0][1], rng[-1][1])
+         ranges.append(s)
+    return ', '.join(ranges)
+
+
 def compute_transition_and_failure_count(recent_builds, step_name, splitter,
     piece, build, builder_name, master_url):
   '''Returns last_pass_build, first_fail_build, fail_count'''
   first_fail = recent_builds[0]
   last_pass = None
   fail_count = 1
+  builds_missing_steps = []
   for build in recent_builds[1:]:
     matching_steps = [s for s in build['steps'] if s['name'] == step_name]
     if len(matching_steps) != 1:
       if not matching_steps:
-        log.warn("%s missing %s" % (build['number'], step_name))
+        # This case is pretty common, so just warn all at once at the end.
+        builds_missing_steps.append(build['number'])
       else:
         log.error("%s has unexpected number of %s steps: %s" % (build['number'], step_name, matching_steps))
       continue
@@ -178,6 +203,10 @@ def compute_transition_and_failure_count(recent_builds, step_name, splitter,
 
     last_pass = build
     break
+
+  if builds_missing_steps:
+    log.warn("builds %s missing %s" % (re_range(builds_missing_steps), step_name))
+
   return last_pass, first_fail, fail_count
 
 
@@ -219,7 +248,7 @@ def would_close_tree(master_config, builder_name, step_name):
   if step_name in closing_steps:
     return True
 
-  log.debug('%s was not found in closing_steps: %s' % (step_name, closing_steps))
+  log.debug('%s not in closing_steps: %s' % (step_name, closing_steps))
   return False
 
 
@@ -278,13 +307,13 @@ def alerts_for_builder(master_config, master_url, builder_name):
       })
   return alerts
 
-
 def alerts_for_master(master_url, master_config):
   builder_names = fetch_builder_names(master_url)
   builder_names = sorted(set(builder_names) - excluded_builders(master_config))
   alerts = []
   for builder_name in builder_names:
-    log.debug("%s %s" % (master_url, builder_name))
+    master_name = master_name_from_url(master_url)
+    log.debug("%s %s" % (master_name, builder_name))
     alerts.extend(alerts_for_builder(master_config, master_url, builder_name))
   return alerts
 
