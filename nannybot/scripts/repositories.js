@@ -43,6 +43,7 @@ function entry_by_name(repo_name) {
     if (registry[i].name == repo_name)
       return registry[i];
   }
+  console.log('No repo named ' + repo_name)
   return null;
 }
 
