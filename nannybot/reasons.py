@@ -43,7 +43,6 @@ def stdio_for_step(master_url, builder_name, build, step):
   base_url = build_url(master_url, builder_name, build['number'])
   stdio_url = "%s/steps/%s/logs/stdio/text" % (base_url, step['name'])
 
-  log.debug("Fetching: %s" % stdio_url)
   try:
     return requests.get(stdio_url).text
   except requests.exceptions.ConnectionError, e:
@@ -80,8 +79,6 @@ class GTestSplitter(object):
       log_parser.ProcessLine(line)
 
     failed_tests = log_parser.FailedTests()
-    log.debug('Found %s failed tests.' % len(failed_tests))
-
     if failed_tests:
       return failed_tests
     # Failed to split, just group with the general failures.
@@ -118,8 +115,6 @@ class JUnitSplitter(object):
       return None
 
     failed_tests = self.failed_tests_from_stdio(stdio_log)
-    log.debug('Found %s failed tests.' % len(failed_tests))
-
     if failed_tests:
       return failed_tests
     # Failed to split, just group with the general failures.
@@ -252,6 +247,9 @@ class CompileSplitter(object):
 # This is a hack I wrote because all the perf bots are failing with:
 # E    0.009s Main  File not found /b/build/slave/Android_GN_Perf/build/src/out/step_results/dromaeo.jslibstyleprototype
 # and it's nice to group them by something at least!
+# Often just hits:
+# 2 new files were left in c:\users\chrome~1.per\appdata\local\temp: Fix the tests to clean up themselves.
+# so disabled for now.
 class GenericRunTests(object):
   def handles_step(self, step):
     return True
@@ -274,7 +272,7 @@ STEP_SPLITTERS = [
   LayoutTestsSplitter(),
   JUnitSplitter(),
   GTestSplitter(),
-  GenericRunTests(),
+  # GenericRunTests(),
 ]
 
 
