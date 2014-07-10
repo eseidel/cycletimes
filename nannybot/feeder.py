@@ -104,19 +104,13 @@ def master_name_from_url(master_url):
 
 def fetch_master_json(master_url):
   url = BUILDERS_URL % master_name_from_url(master_url)
-  request = requests.get(url)
-  if request.elapsed.total_seconds() > 1:
-    log.debug('Slow: %0.1fs %s' % (request.elapsed.total_seconds(), request.url))
-  return request.json()
+  return requests.get(url).json()
 
 
 def builds_for_builder(master_url, builder_name):
   master_name = master_name_from_url(master_url)
   params = { 'master': master_name, 'builder': builder_name }
-  request = requests.get(BUILDS_URL, params=params)
-  if request.elapsed.total_seconds() > 1:
-    log.warn('Slow: %0.1fs %s' % (request.elapsed.total_seconds(), request.url))
-  return request.json()['builds']
+  return requests.get(BUILDS_URL, params=params).json()['builds']
 
 
 # FIXME: This belongs in gatekeeper_ng_config.py
@@ -162,9 +156,12 @@ def re_range(lst):
     return ', '.join(ranges)
 
 
-def compute_transition_and_failure_count(recent_builds, step_name, splitter,
-    reason, build, builder_name, master_url):
+def compute_transition_and_failure_count(failure, build, recent_builds):
   '''Returns last_pass_build, first_fail_build, fail_count'''
+
+  step_name = failure['step_name']
+  reason = failure['piece']
+
   first_fail = recent_builds[0]
   last_pass = None
   fail_count = 1
@@ -182,8 +179,9 @@ def compute_transition_and_failure_count(recent_builds, step_name, splitter,
     step = matching_steps[0]
     step_result = step['results'][0]
     if step_result not in NON_FAILING_RESULTS:
-      if splitter and reason:
-        reasons = splitter.split_step(step, build, builder_name, master_url)
+      if reason:
+        reasons = reasons_for_failure(step, build,
+          failure['builder_name'], failure['master_url'])
         # This build doesn't seem to have this step reason, ignore it.
         if not reasons:
           continue
@@ -252,6 +250,10 @@ def would_close_tree(master_config, builder_name, step_name):
   return False
 
 def failing_steps_for_build(build):
+  # This check is probably not neccessy.
+  if build.get('results', 0) == 0:
+    return []
+
   failing_steps = [step for step in build['steps'] if step['results'][0] not in NON_FAILING_RESULTS]
 
   # Some builders use a sub-step pattern which just generates noise.
@@ -260,61 +262,70 @@ def failing_steps_for_build(build):
   return [step for step in failing_steps if step['name'] not in IGNORED_STEPS]
 
 
-def splitter_and_reasons_for_failure(step, build, builder_name, master_url):
+def reasons_for_failure(step, build, builder_name, master_url):
     splitter = next((splitter for splitter in reasons.STEP_SPLITTERS if splitter.handles_step(step)), None)
     if not splitter:
-      return None, None
-    return splitter, splitter.split_step(step, build, builder_name, master_url)
+      return None
+    return splitter.split_step(step, build, builder_name, master_url)
 
-# FIXME: This method is way too long and needs refactor.
-def alerts_for_builder(master_config, master_url, builder_name, active_builds):
-  alerts = []
-  active_builds = filter(lambda build: build['builderName'] == builder_name, active_builds)
 
-  recent_builds = builds_for_builder(master_url, builder_name)
-  if not recent_builds:
-    log.warn("No recent builds for %s, skipping." % builder_name)
-    return alerts
-
-  build = recent_builds[0]
-  # If we are not currently failing, we have no alerts to give.
-  if build.get('results', 0) == 0:
-    return alerts
-
+def failures_for_build(build, master_url, builder_name):
+  failures = []
   for step in failing_steps_for_build(build):
-    would_close = would_close_tree(master_config, builder_name, step['name'])
     step_template = {
       'master_url': master_url,
       'last_result_time': step['times'][1],
       'builder_name': builder_name,
       'step_name': step['name'],
-      'would_close_tree': would_close,
     }
-
-    splitter, reasons = splitter_and_reasons_for_failure(step, build, builder_name, master_url)
-
+    reasons = reasons_for_failure(step, build, builder_name, master_url)
     if not reasons:
-      reasons = [None] # FIXME: Hack to always enter the loop.
+      failure = dict(step_template)
+      failure['piece'] = None
+      failures.append(failure)
+    else:
+      for reason in reasons:
+        failure = dict(step_template)
+        # FIXME: piece is the old name, update UI first.
+        failure['piece'] = reason
+        failures.append(failure)
 
-    for reason in reasons:
-      last_pass_build, first_fail_build, fail_count = \
-        compute_transition_and_failure_count(recent_builds, step['name'],
-          splitter, reason, build, builder_name, master_url)
+  return failures
 
-      failing = revisions_from_build(first_fail_build)
-      passing = revisions_from_build(last_pass_build) if last_pass_build else None
 
-      alert = dict(step_template)
-      alert.update({
-        'piece': reason,
-        'failing_build_count': fail_count,
-        'passing_build': last_pass_build['number'] if last_pass_build else None,
-        'failing_build': first_fail_build['number'],
-        'failing_revisions': failing,
-        'passing_revisions': passing,
-      })
-      alerts.append(alert)
-  return alerts
+# FIXME: This should merge with compute_transition_and_failure_count.
+def fill_in_transition(failure, build, recent_builds):
+  last_pass_build, first_fail_build, fail_count = \
+    compute_transition_and_failure_count(failure, build, recent_builds)
+
+  failing = revisions_from_build(first_fail_build)
+  passing = revisions_from_build(last_pass_build) if last_pass_build else None
+
+  failure.update({
+    'failing_build_count': fail_count,
+    'passing_build': last_pass_build['number'] if last_pass_build else None,
+    'failing_build': first_fail_build['number'],
+    'failing_revisions': failing,
+    'passing_revisions': passing,
+  })
+  return failure
+
+
+def alerts_for_builder(master_config, master_url, builder_name, active_builds):
+  active_builds = filter(lambda build: build['builderName'] == builder_name, active_builds)
+
+  recent_builds = builds_for_builder(master_url, builder_name)
+  if not recent_builds:
+    log.warn("No recent builds for %s, skipping." % builder_name)
+    return []
+
+  build = recent_builds[0]
+  failures = failures_for_build(build, master_url, builder_name)
+  for failure in failures:
+    failure['would_close_tree'] = would_close_tree(master_config, failure['builder_name'], failure['step_name'])
+
+  return [fill_in_transition(failure, build, recent_builds) for failure in failures]
+
 
 def alerts_for_master(master_url, master_config):
   master_json = fetch_master_json(master_url)
