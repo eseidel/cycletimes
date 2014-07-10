@@ -249,11 +249,32 @@ class CompileSplitter(object):
     return None
 
 
+# This is a hack I wrote because all the perf bots are failing with:
+# E    0.009s Main  File not found /b/build/slave/Android_GN_Perf/build/src/out/step_results/dromaeo.jslibstyleprototype
+# and it's nice to group them by something at least!
+class GenericRunTests(object):
+  def handles_step(self, step):
+    return True
+
+  def split_step(self, step, build, builder_name, master_url):
+    stdio = stdio_for_step(master_url, builder_name, build, step)
+    # Can't split if we can't get the logs.
+    if not stdio:
+      return None
+
+    last_line = None
+    for line in stdio.split('\n'):
+      if last_line and line.startswith('exit code (as seen by runtest.py):'):
+        return [last_line]
+      last_line = line
+
+
 STEP_SPLITTERS = [
   CompileSplitter(),
   LayoutTestsSplitter(),
   JUnitSplitter(),
   GTestSplitter(),
+  GenericRunTests(),
 ]
 
 
