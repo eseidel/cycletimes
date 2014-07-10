@@ -212,6 +212,13 @@ Polymer('nb-grouped-alert-list', {
     <tr>
     <td>{{ignore.pattern}}</td>
     <td>{{ignore.date | since_string}}</td>
+    <td>
+      <form action='/ignore' method='post'>
+        <input type='hidden' name='action' value='delete'>
+        <input type='hidden' name='key' value='{{ignore.key}}'>
+        <input type='submit' value='delete'>
+      </form>
+    </td>
     </tr>
     </template>
     </table>

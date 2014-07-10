@@ -42,13 +42,19 @@ class IgnoreRule(ndb.Model):
 class IgnoreHandler(webapp2.RequestHandler):
     def get(self):
         query = IgnoreRule.query()
-        ignore_dicts = map(ndb.Model.to_dict, query.fetch())
+        ignore_dicts = map(IgnoreRule.dict_with_key, query.fetch())
         self.response.write(json.dumps(ignore_dicts, cls=DateTimeEncoder))
 
     def post(self):
-        ignore = IgnoreRule()
-        ignore.pattern = self.request.get('pattern')
-        ignore.put()
+        # FIXME: For whatever reason I can't get <form method='delete'> to work.
+        if self.request.get('action') == 'delete':
+            # FIXME: It's lame that this constructor is type-sensitive.
+            key = ndb.Key(IgnoreRule, int(self.request.get('key')))
+            key.delete()
+        else:
+            ignore = IgnoreRule()
+            ignore.pattern = self.request.get('pattern')
+            ignore.put()
         self.redirect('/')
 
 
