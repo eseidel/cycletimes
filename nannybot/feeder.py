@@ -148,7 +148,10 @@ def compute_transition_and_failure_count(recent_builds, step_name, splitter,
   for build in recent_builds[1:]:
     matching_steps = [s for s in build['steps'] if s['name'] == step_name]
     if len(matching_steps) != 1:
-      log.error("%s has unexpected number of %s steps: %s" % (build['number'], step_name, matching_steps))
+      if not matching_steps:
+        log.warn("%s missing %s" % (build['number'], step_name))
+      else:
+        log.error("%s has unexpected number of %s steps: %s" % (build['number'], step_name, matching_steps))
       continue
 
     step = matching_steps[0]
