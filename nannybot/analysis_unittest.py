@@ -50,7 +50,7 @@ class FailureAnalysisTest(unittest.TestCase):
     {
      "failing_revisions": {
       "v8": "22263",
-      "nacl": "13452"
+      "nacl": null
      },
      "passing_revisions": {
       "v8": "22263",
@@ -82,29 +82,29 @@ class FailureAnalysisTest(unittest.TestCase):
         commit_list = analysis.flatten_to_commit_list(passing, failing)
         self.assertEquals(commit_list, ['v8:2'])
 
-        commit_list = analysis.flatten_to_commit_list(None, failing)
-        self.assertEquals(commit_list, ['<=v8:2', '<=chromium:4'])
+
+    def test_range_key_for_group(self):
+        failing = { 'v8': '2', 'chromium': '4'}
+        group = {
+            'merged_last_passing': None,
+            'merged_first_failing': failing,
+            'sort_key': 'foobar',
+        }
+        range_key = analysis.range_key_for_group(group)
+        self.assertEquals(range_key, 'foo<=v8:2 <=chromium:4')
 
     MERGE_BY_RANGE_JSON = """
 [
   {
-   "likely_revisions": [
-    "nacl:13442",
-    "nacl:13452",
-    "chromium:281990",
-    "chromium:282022"
-   ],
+   "merged_last_passing": { "v8": "1" },
+   "merged_first_failing": { "v8": "2" },
    "sort_key": "dromaeo.domcoreattr",
    "failure_keys": [
    ]
   },
   {
-   "likely_revisions": [
-    "nacl:13442",
-    "nacl:13452",
-    "chromium:282022",
-    "chromium:281990"
-   ],
+   "merged_last_passing": { "v8": "1" },
+   "merged_first_failing": { "v8": "2" },
    "sort_key": "dromaeo.jslibmodifyprototype",
    "failure_keys": [
    ]

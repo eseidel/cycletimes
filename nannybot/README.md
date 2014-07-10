@@ -11,3 +11,10 @@ Directories with third_party in their name may have their own (compatible) licen
 favicon.ico is from:
 http://www.favicon.cc/?action=icon&file_id=695650
 which says it's Creative Commons without attribution.
+
+
+TODO:
+
+- add heuristicallyNarrowRegressionRange like GOM.
+
+Ask each narrower, if it can make the revision set smaller.

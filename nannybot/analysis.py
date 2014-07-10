@@ -54,26 +54,37 @@ def assign_keys(alerts):
     return alerts
 
 
+def _make_merge_dicts(reducer):
+    def merge_dicts(one, two):
+        if not one or not two:
+            return None
+        reduction = {}
+        for key in set(one.keys() + two.keys()):
+            one_value = one.get(key)
+            two_value = two.get(key)
+            reduction[key] = reducer(one_value, two_value)
+        return reduction
+    return merge_dicts
+
+
 def merge_regression_ranges(alerts):
-    def make_merge_dicts(reducer):
-        def merge_dicts(one, two):
-            if not one or not two:
-                return None
-            reduction = {}
-            for key in one.keys():
-                reduction[key] = reducer(one[key], two[key])
-            return reduction
-        return merge_dicts
+    def make_compare(compare_func):
+        def compare(one, two):
+            if one and two and compare_func(one, two):
+                return one
+            # Treat None is 'infinite' so always return the more limiting.
+            # FIXME: 'passing' may wish to prefer None over a value?
+            return two or one
+        return compare
 
-    # These don't handle the case where commits can't be compared.
-    older_commit = lambda one, two: one if is_ancestor_of(one, two) else two
-    younger_commit = lambda one, two: one if is_decendant_of(one, two) else two
-
+    # These don't handle the case where commits can't be compared (git branches)
+    younger_commit = make_compare(is_decendant_of)
     passing_dicts = map(operator.itemgetter('passing_revisions'), alerts)
-    last_passing = reduce(make_merge_dicts(younger_commit), passing_dicts)
+    last_passing = reduce(_make_merge_dicts(younger_commit), passing_dicts)
 
+    older_commit = make_compare(is_ancestor_of)
     failing_dicts = map(operator.itemgetter('failing_revisions'), alerts)
-    first_failing = reduce(make_merge_dicts(older_commit), failing_dicts)
+    first_failing = reduce(_make_merge_dicts(older_commit), failing_dicts)
 
     return last_passing, first_failing
 
@@ -133,7 +144,7 @@ def range_key_for_group(group):
     # sort_key is a heuristic to avoid merging failiures like
     # gclient revert + webkit_tests which just happened to pull
     # exact matching revisions when failing.
-    return range_key + group['sort_key'][:3]
+    return group['sort_key'][:3] + range_key
 
 
 def merge_by_range(reason_groups):
