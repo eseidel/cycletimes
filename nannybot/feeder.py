@@ -311,7 +311,7 @@ def fill_in_transition(failure, build, recent_builds):
   return failure
 
 
-def alerts_for_builder(master_config, master_url, builder_name, active_builds):
+def alerts_for_builder(master_url, builder_name, active_builds):
   active_builds = filter(lambda build: build['builderName'] == builder_name, active_builds)
 
   recent_builds = builds_for_builder(master_url, builder_name)
@@ -321,9 +321,6 @@ def alerts_for_builder(master_config, master_url, builder_name, active_builds):
 
   build = recent_builds[0]
   failures = failures_for_build(build, master_url, builder_name)
-  for failure in failures:
-    failure['would_close_tree'] = would_close_tree(master_config, failure['builder_name'], failure['step_name'])
-
   return [fill_in_transition(failure, build, recent_builds) for failure in failures]
 
 
@@ -342,7 +339,11 @@ def alerts_for_master(master_url, master_config):
   for builder_name in builder_names:
     master_name = master_name_from_url(master_url)
     log.debug("%s %s" % (master_name, builder_name))
-    alerts.extend(alerts_for_builder(master_config, master_url, builder_name, active_builds))
+    alerts.extend(alerts_for_builder(master_url, builder_name, active_builds))
+
+  for alert in alerts:
+    alert['would_close_tree'] = would_close_tree(master_config, alert['builder_name'], alert['step_name'])
+
   return alerts
 
 
@@ -353,6 +354,13 @@ def fetch_alerts(args, gatekeeper_config):
       continue
     alerts.extend(alerts_for_master(url, config))
   return alerts
+
+
+# Map gatekeeper.json to master_urls
+# Map master_url to master_blob
+# Map master_blob to (master:builder, current_build) and (master:builder, builder_blob)
+# Map builder_blob to failures
+# Shuffle failures into (master:builder, [(build, failure), (build, failure)])
 
 
 def main(args):
