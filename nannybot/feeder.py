@@ -15,6 +15,7 @@ import requests_cache
 import sys
 import urllib
 import urlparse
+import gatekeeper_extras
 
 # This is relative to build/scripts:
 # https://chromium.googlesource.com/chromium/tools/build/+/master/scripts
@@ -54,49 +55,6 @@ BUILDS_URL = 'https://chrome-build-extract.appspot.com/get_builds'
 # Success or Warnings or None (didn't run) don't count as 'failing'.
 NON_FAILING_RESULTS = (0, 1, None)
 
-# Always use parent_*_revision, it should be set correctly
-# even for bots which don't have a 'parent' bot which builds
-# for them.
-REPOSITORIES = [
-  {
-    'name': 'chromium',
-    'change_url': 'http://crrev.com/%s',
-    'changelog_url': 'http://build.chromium.org/f/chromium/perf/dashboard/ui/changelog.html?url=/trunk&range=%s:%s',
-    'buildbot_revision_name': 'got_revision',
-  },
-  {
-    'name': 'blink',
-    'change_url': 'https://src.chromium.org/viewvc/blink?view=revision&revision=%s',
-    'changelog_url': 'http://build.chromium.org/f/chromium/perf/dashboard/ui/changelog_blink.html?url=/trunk&range=%s:%s',
-    'buildbot_revision_name': 'got_webkit_revision',
-  },
-  {
-    'name': 'v8',
-    'change_url': 'https://code.google.com/p/v8/source/detail?r=%s',
-    'changelog_url': 'http://build.chromium.org/f/chromium/perf/dashboard/ui/changelog_v8.html?url=/trunk&range=%s:%s',
-    'buildbot_revision_name': 'got_v8_revision',
-  },
-  {
-    'name': 'nacl',
-    'change_url': 'http://src.chromium.org/viewvc/native_client?view=revision&revision=',
-    # FIXME: Does nacl have a changelog viewer?
-    'buildbot_revision_name': 'got_nacl_revision',
-  },
-  # Skia, for whatever reason, isn't exposed in the buildbot properties
-  # so don't bother to include it here.
-  # {
-  #   'name': 'skia',
-  #   'change_url': 'https://code.google.com/p/skia/source/detail?r=%s',
-  #   'buildbot_revision_name': 'got_skia_revision',
-  # }
-]
-
-
-def repository_by_name(name):
-  for repository in REPOSITORIES:
-    if repository['name'] == name:
-      return repository
-
 
 def master_name_from_url(master_url):
   return urlparse.urlparse(master_url).path.split('/')[-1]
@@ -113,20 +71,25 @@ def builds_for_builder(master_url, builder_name):
   return requests.get(BUILDS_URL, params=params).json()['builds']
 
 
-# FIXME: This belongs in gatekeeper_ng_config.py
-def excluded_builders(config):
-    return config[0].get('*', {}).get('excluded_builders', set())
-
-
+# This effectively extracts the 'configuration' of the build
+# we could extend this beyond repo versions in the future.
 def revisions_from_build(build_json):
   def _property_value(build_json, property_name):
     for prop_tuple in build_json['properties']:
       if prop_tuple[0] == property_name:
         return prop_tuple[1]
 
+  REVISION_VARIABLES = [
+    ('chromium', 'got_revision'),
+    ('blink', 'got_webkit_revision'),
+    ('v8', 'got_v8_revision'),
+    ('nacl', 'got_nacl_revision'),
+    # Skia, for whatever reason, isn't exposed in the buildbot properties so
+    # don't bother to include it here.
+  ]
+
   revisions = {}
-  for repository in REPOSITORIES:
-    buildbot_property = repository['buildbot_revision_name']
+  for repo_name, buildbot_property in REVISION_VARIABLES:
     # This is epicly stupid:  'tester' builders have the wrong
     # revision for 'got_foo_revision' and we have to use
     # parent_got_foo_revision instead, but non-tester builders
@@ -136,7 +99,7 @@ def revisions_from_build(build_json):
     revision = _property_value(build_json, 'parent_' + buildbot_property)
     if not revision:
       revision = _property_value(build_json, buildbot_property)
-    revisions[repository['name']] = revision
+    revisions[repo_name] = revision
   return revisions
 
 
@@ -207,47 +170,6 @@ def compute_transition_and_failure_count(failure, build, recent_builds):
 
   return last_pass, first_fail, fail_count
 
-
-# FIXME: This belongs in gatekeeper_ng_config.py
-def would_close_tree(master_config, builder_name, step_name):
-  # FIXME: Section support should be removed:
-  master_config = master_config[0]
-  builder_config = master_config.get(builder_name, {})
-  if not builder_config:
-    builder_config = master_config.get('*', {})
-
-  # close_tree is currently unused in gatekeeper.json but planned to be.
-  close_tree = builder_config.get('close_tree', True)
-  if not close_tree:
-    log.debug('close_tree is false')
-    return False
-
-  # Excluded steps never close.
-  excluded_steps = set(builder_config.get('excluded_steps', []))
-  if step_name in excluded_steps:
-    log.debug('%s is an excluded_step' % step_name)
-    return False
-
-  # See gatekeeper_ng_config.py for documentation of
-  # the config format.
-  # forgiving/closing controls if mails are sent on close.
-  # steps/optional controls if step-absence indicates failure.
-  # this function assumes the step is present and failing
-  # and thus doesn't care between these 4 types:
-  closing_steps = (builder_config.get('forgiving_steps', set()) |
-    builder_config.get('forgiving_optional', set()) |
-    builder_config.get('closing_steps', set()) |
-    builder_config.get('closing_optional', set()))
-
-  # A '*' in any of the above types means it applies to all steps.
-  if '*' in closing_steps:
-    return True
-
-  if step_name in closing_steps:
-    return True
-
-  log.debug('%s not in closing_steps: %s' % (step_name, closing_steps))
-  return False
 
 def failing_steps_for_build(build):
   # This check is probably not neccessy.
@@ -328,7 +250,8 @@ def alerts_for_master(master_url, master_config):
   master_json = fetch_master_json(master_url)
 
   builder_names = master_json['builders']
-  builder_names = sorted(set(builder_names) - excluded_builders(master_config))
+  builder_names = sorted(set(builder_names) \
+    - gatekeeper_extras.excluded_builders(master_config))
 
   active_builds = []
   for slave in master_json['slaves'].values():
@@ -342,7 +265,9 @@ def alerts_for_master(master_url, master_config):
     alerts.extend(alerts_for_builder(master_url, builder_name, active_builds))
 
   for alert in alerts:
-    alert['would_close_tree'] = would_close_tree(master_config, alert['builder_name'], alert['step_name'])
+    alert['would_close_tree'] = \
+      gatekeeper_extras.would_close_tree(master_config,
+        alert['builder_name'], alert['step_name'])
 
   return alerts
 
@@ -356,11 +281,16 @@ def fetch_alerts(args, gatekeeper_config):
   return alerts
 
 
-# Map gatekeeper.json to master_urls
+# Want to get all failures for all builds in the universe.
+# Sort into most recent failures and then walk backwards to understand.
+
+# cron job loads gatekeeper.json and starts MR with master_urls
 # Map master_url to master_blob
-# Map master_blob to (master:builder, current_build) and (master:builder, builder_blob)
-# Map builder_blob to failures
-# Shuffle failures into (master:builder, [(build, failure), (build, failure)])
+# Map master_blob to (master:builder, build_blobs) and (master:builder, builder_url)
+# Map builder_url to build_blobs
+# Map build_blob to failures
+# Shuffle failures into (master:builder, [failure, failure])
+# Reduce
 
 
 def main(args):
