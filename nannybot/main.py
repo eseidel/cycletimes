@@ -43,6 +43,8 @@ class IgnoreHandler(webapp2.RequestHandler):
     def get(self):
         query = IgnoreRule.query()
         ignore_dicts = map(IgnoreRule.dict_with_key, query.fetch())
+        self.response.headers.add_header("Access-Control-Allow-Origin", "*")
+        self.response.headers['Content-Type'] = 'application/json'
         self.response.write(json.dumps(ignore_dicts, cls=DateTimeEncoder))
 
     def post(self):
@@ -80,6 +82,9 @@ class DataHandler(webapp2.RequestHandler):
                 'ignores': map(IgnoreRule.dict_with_key, ignores),
                 'reason_groups': range_groups,
             }
+
+        self.response.headers.add_header("Access-Control-Allow-Origin", "*")
+        self.response.headers['Content-Type'] = 'application/json'
         self.response.write(json.dumps(response_json, cls=DateTimeEncoder, indent=1))
 
     def post(self):
