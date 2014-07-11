@@ -44,13 +44,9 @@ def setup_logging():
 
 log, logging_handler = setup_logging()
 
-
-MASTER_URLS = ['https://build.chromium.org/p/chromium.webkit']
-
+# FIXME: Pull from:
+# https://chromium.googlesource.com/chromium/tools/build/+/master/scripts/slave/gatekeeper.json?format=TEXT
 CONFIG_PATH = os.path.join(BUILD_SCRIPTS_PATH, 'slave', 'gatekeeper.json')
-BUILDERS_URL = 'https://chrome-build-extract.appspot.com/get_master/%s'
-BUILDS_URL = 'https://chrome-build-extract.appspot.com/get_builds'
-
 
 # Success or Warnings or None (didn't run) don't count as 'failing'.
 NON_FAILING_RESULTS = (0, 1, None)
@@ -61,14 +57,16 @@ def master_name_from_url(master_url):
 
 
 def fetch_master_json(master_url):
-  url = BUILDERS_URL % master_name_from_url(master_url)
+  builders_url = 'https://chrome-build-extract.appspot.com/get_master/%s'
+  url = builders_url % master_name_from_url(master_url)
   return requests.get(url).json()
 
 
 def builds_for_builder(master_url, builder_name):
+  builds_url = 'https://chrome-build-extract.appspot.com/get_builds'
   master_name = master_name_from_url(master_url)
   params = { 'master': master_name, 'builder': builder_name }
-  return requests.get(BUILDS_URL, params=params).json()['builds']
+  return requests.get(builds_url, params=params).json()['builds']
 
 
 # This effectively extracts the 'configuration' of the build
@@ -310,18 +308,6 @@ def main(args):
   for url in args.data_url:
     log.info('POST %s alerts to %s' % (len(alerts), url))
     requests.post(url, data=data)
-
-  # Find the list of failing steps?
-  # Walk backwards until no failure.
-  #
-
-  # Find the list of bots who's most recent build had a compile failure.
-  # Walk backwards until it didn't.
-  # Know the regression range.
-  # Apply heuristics.
-  # Rollout.
-  # for master_url in MASTER_URLS:
-  #   master_config = gatekeeper_config[master_url]
 
 
 if __name__ == '__main__':

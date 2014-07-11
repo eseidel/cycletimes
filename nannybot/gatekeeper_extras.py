@@ -2,7 +2,24 @@
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
-# FIXME: All of these belong in gatekeeper_ng_config.py
+# FIXME: Everything in this file belongs in gatekeeper_ng_config.py
+
+import logging
+
+# Python logging is stupidly verbose to configure.
+def setup_logging():
+    logger = logging.getLogger(__name__)
+    logger.setLevel(logging.DEBUG)
+    handler = logging.StreamHandler()
+    handler.setLevel(logging.DEBUG)
+    formatter = logging.Formatter('%(levelname)s: %(message)s')
+    handler.setFormatter(formatter)
+    logger.addHandler(handler)
+    return logger, handler
+
+
+log, logging_handler = setup_logging()
+
 
 def excluded_builders(master_config):
     return master_config[0].get('*', {}).get('excluded_builders', set())
