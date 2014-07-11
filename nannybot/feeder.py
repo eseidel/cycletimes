@@ -123,7 +123,7 @@ def compute_transition_and_failure_count(failure, build, recent_builds):
   '''Returns last_pass_build, first_fail_build, fail_count'''
 
   step_name = failure['step_name']
-  reason = failure['piece']
+  reason = failure['reason']
 
   first_fail = recent_builds[0]
   last_pass = None
@@ -203,13 +203,12 @@ def failures_for_build(build, master_url, builder_name):
     reasons = reasons_for_failure(step, build, builder_name, master_url)
     if not reasons:
       failure = dict(step_template)
-      failure['piece'] = None
+      failure['reason'] = None
       failures.append(failure)
     else:
       for reason in reasons:
         failure = dict(step_template)
-        # FIXME: piece is the old name, update UI first.
-        failure['piece'] = reason
+        failure['reason'] = reason
         failures.append(failure)
 
   return failures

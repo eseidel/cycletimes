@@ -77,9 +77,9 @@
         <td style='max-width: 300px; overflow: hidden; word-wrap: break-word;'>
           <a href='{{ record.row | stdio_url(record.row.failing_build) }}'>{{record.row.step_name}}</a>
           <br>
-          <template if="{{ record.row.piece }}">
-            <a href="{{ record.row.piece | flakiness_dashboard_url(record.row.step_name) }}">
-              {{record.row.piece }}
+          <template if="{{ record.row.reason }}">
+            <a href="{{ record.row.reason | flakiness_dashboard_url(record.row.step_name) }}">
+              {{record.row.reason }}
             </a>
           </template>
         </td>
@@ -104,7 +104,7 @@
         { title: 'master', name: 'master_url' },
         { title: 'builder', name: 'builder_name' },
         { title: 'times', name: 'failing_build_count' },
-        { title: 'failure', name: 'piece' },
+        { title: 'failure', name: 'reason' },
         { title: 'edges', name: 'failing_build' }, // bad sort criteria.
         { title: 'changelogs', name: 'failing_revisions' }, // also bad.
         { title: 'since', name: 'last_result_time' },
@@ -138,12 +138,12 @@
     <tr>
       <td>
         {{ group.failures[0].step_name }}
-        <template repeat="{{ piece in group.pieces }}">
-          <template if="{{ piece }}">
+        <template repeat="{{ reason in group.reasons }}">
+          <template if="{{ reason }}">
             <!-- FIXME this will be wrong if there are multiple step names! -->
             <div>
-            <a href="{{ piece | flakiness_dashboard_url(group.failures[0].step_name) }}">
-              {{piece }}
+            <a href="{{ reason | flakiness_dashboard_url(group.failures[0].step_name) }}">
+              {{reason }}
             </a>
             </div>
           </template>
@@ -179,17 +179,17 @@ Polymer('nb-grouped-alert-list', {
   groupsChanged: function(oldValue, newValue) {
     // This is kinda hacky to modify newValue.
     newValue.forEach(function(group) {
-      var pieces = {};
+      var reasons = {};
       var builder_names = {};
       group.failures = []
       group.failure_keys.forEach(function(failure_key) {
         var failure = this.failureForKey(failure_key);
         group.failures.push(failure);
-        if (failure.piece)
-          pieces[failure.piece] = 1;
+        if (failure.reason)
+          reasons[failure.reason] = 1;
         builder_names[failure.builder_name] = 1;
       }, this);
-      group.pieces = Object.keys(pieces);
+      group.reasons = Object.keys(reasons);
       group.builder_names = Object.keys(builder_names);
     }, this);
   },
