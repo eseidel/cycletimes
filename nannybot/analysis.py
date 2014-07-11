@@ -92,8 +92,8 @@ def merge_regression_ranges(alerts):
 def reason_key_for_alert(alert):
     # FIXME: May need something smarter for reason_key.
     reason_key = alert['step_name']
-    if alert['piece']:
-        reason_key += ':%s' % alert['piece']
+    if alert['reason']:
+        reason_key += ':%s' % alert['reason']
     else:
         # If we don't understand the alert, just make it builder-unique.
         reason_key += ':%s' % alert['builder_name']
