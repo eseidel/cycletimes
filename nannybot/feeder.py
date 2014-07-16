@@ -10,7 +10,7 @@ import itertools
 import json
 import logging
 import operator
-import os.path
+import os
 import sys
 import urllib
 import urlparse
@@ -26,7 +26,6 @@ sys.path.append(BUILD_SCRIPTS_PATH)
 from slave import gatekeeper_ng_config
 
 import reasons
-
 
 # Masters:
 # https://apis-explorer.appspot.com/apis-explorer/?base=https://chrome-infra-stats.appspot.com/_ah/api#p/stats/v1/stats.masters.list?_h=1&
@@ -64,11 +63,87 @@ def fetch_master_json(master_url):
   return requests.get(url).json()
 
 
-def builds_for_builder(master_url, builder_name):
+def cache_path(master_url, builder_name, build_number):
+  master_name = master_name_from_url(master_url)
+  return '/src/build_cache/%s/%s/%s.json' % (master_name, builder_name, build_number)
+
+
+def build_from_cache(master_url, builder_name, build_number):
+  path = cache_path(master_url, builder_name, build_number)
+  if not os.path.exists(path):
+    return None
+  with open(path) as cached:
+    return json.load(cached)
+
+
+def cache_build_at_path(build_json, cache_path):
+  cache_dir = os.path.dirname(cache_path)
+  if not os.path.exists(cache_dir):
+    os.makedirs(cache_dir)
+  with open(cache_path, 'w') as cached:
+    cached.write(json.dumps(build_json))
+
+
+# FIXME: I don't think master_url or  builder_name are needed.
+def cache_build(master_url, builder_name, build_number, build_json):
+  path = cache_path(master_url, builder_name, build_number)
+  cache_build_at_path(build_json, path)
+
+
+def prefill_builds_cache(master_url, builder_name):
   builds_url = 'https://chrome-build-extract.appspot.com/get_builds'
   master_name = master_name_from_url(master_url)
   params = { 'master': master_name, 'builder': builder_name }
-  return requests.get(builds_url, params=params).json()['builds']
+  response = requests.get(builds_url, params=params)
+  builds = response.json()['builds']
+  for build in builds:
+    if not build.get('number'):
+      index = builds.index(build)
+      log.error('build at index %s in %s missing number?' % (index, response.url))
+      continue
+    build_number = build['number']
+    cache_build(master_url, builder_name, build_number, build)
+  build_numbers = map(operator.itemgetter('number'), builds)
+  # log.debug('Prefilled %s for %s %s' % (re_range(build_numbers), master_url, builder_name))
+  return build_numbers
+
+
+def fetch_and_cache_build(url, cache_key):
+  try:
+    build = requests.get(url).json()
+    # Don't cache builds which are just errors?
+    if build.get('number'):
+      if build.get('eta') is None:
+        cache_build_at_path(build, cache_key)
+      else:
+        log.debug('Not caching in-progress build from %s.')
+      return build
+  except ValueError, e:
+    log.error('Error %s: %s' % (url, e))
+
+
+def fetch_build_json(master_url, builder_name, build_number):
+  build = build_from_cache(master_url, builder_name, build_number)
+  # I accidentally stored some error builds and incomplete builds before.
+  if build and (not build.get('number') or build.get('eta')):
+    log.warn('Refetching %s %s %s' % (master_url, builder_name, build_number))
+    build = None
+
+  cache_key = cache_path(master_url, builder_name, build_number)
+  master_name = master_name_from_url(master_url)
+
+  cbe_url = "https://chrome-build-extract.appspot.com/p/%s/builders/%s/builds/%s?json=1" % (
+    master_name, builder_name, build_number)
+  if not build:
+    build = fetch_and_cache_build(cbe_url, cache_key)
+
+  if not build:
+    log.warn("CBE failed, failover to buildbot %s" % cbe_url)
+    buildbot_url = "https://build.chromium.org/p/%s/json/builders/%s/builds/%s" % (
+      master_name, builder_name, build_number)
+    build = fetch_and_cache_build(buildbot_url, cache_key)
+
+  return build
 
 
 # This effectively extracts the 'configuration' of the build
@@ -172,7 +247,9 @@ def compute_transition_and_failure_count(failure, build, recent_builds):
 
 
 def failing_steps_for_build(build):
-  # This check is probably not neccessy.
+  if build.get('results') is None:
+    log.error('Bad build: %s %s %s' % (build.get('number'), build.get('eta'), build.get('currentStep', {}).get('name')))
+  # This check is probably not necessary.
   if build.get('results', 0) == 0:
     return []
 
@@ -233,10 +310,22 @@ def fill_in_transition(failure, build, recent_builds):
   return failure
 
 
-def alerts_for_builder(master_url, builder_name, active_builds):
-  active_builds = filter(lambda build: build['builderName'] == builder_name, active_builds)
+def alerts_for_builder(master_url, builder_name, recent_build_ids, active_builds):
+  recent_build_ids = sorted(recent_build_ids, reverse=True)
 
-  recent_builds = builds_for_builder(master_url, builder_name)
+  active_build_ids = [b['number'] for b in active_builds]
+  # recent_build_ids includes active ones.
+  recent_build_ids = [b for b in recent_build_ids if b not in active_build_ids]
+
+  if not build_from_cache(master_url, builder_name, recent_build_ids[0]):
+    prefill_builds_cache(master_url, builder_name)
+
+  # Limit to 100 for now to match the prefill.
+  recent_build_ids = recent_build_ids[:100]
+
+  recent_builds = [fetch_build_json(master_url, builder_name, num) for num in recent_build_ids]
+  # Some fetches may fail.
+  recent_builds = filter(None, recent_builds)
   if not recent_builds:
     log.warn("No recent builds for %s, skipping." % builder_name)
     return []
@@ -248,10 +337,7 @@ def alerts_for_builder(master_url, builder_name, active_builds):
 
 def alerts_for_master(master_url, master_config):
   master_json = fetch_master_json(master_url)
-
-  builder_names = master_json['builders']
-  builder_names = sorted(set(builder_names) \
-    - gatekeeper_extras.excluded_builders(master_config))
+  excluded_builders = gatekeeper_extras.excluded_builders(master_config)
 
   active_builds = []
   for slave in master_json['slaves'].values():
@@ -259,10 +345,16 @@ def alerts_for_master(master_url, master_config):
       active_builds.append(build)
 
   alerts = []
-  for builder_name in builder_names:
+  for builder_name, builder_json in master_json['builders'].items():
+    if builder_name in excluded_builders:
+      continue
+
+    actives = filter(lambda build: build['builderName'] == builder_name, active_builds)
+    # cachedBuilds will include runningBuilds.
+    recent_build_ids = builder_json['cachedBuilds']
     master_name = master_name_from_url(master_url)
     log.debug("%s %s" % (master_name, builder_name))
-    alerts.extend(alerts_for_builder(master_url, builder_name, active_builds))
+    alerts.extend(alerts_for_builder(master_url, builder_name, recent_build_ids, actives))
 
   for alert in alerts:
     alert['would_close_tree'] = \
@@ -300,21 +392,24 @@ def main(args):
   parser.add_argument('--master-filter', action='store')
   args = parser.parse_args(args)
 
+  if not args.data_url:
+    log.warn("No /data url passed, won't do anything")
+
   if args.use_cache:
     requests_cache.install_cache('failure_stats')
   else:
     requests_cache.install_cache(backend='memory')
 
-  start_time = datetime.datetime.now()
-
   gatekeeper_config = gatekeeper_ng_config.load_gatekeeper_config(CONFIG_PATH)
+
+  start_time = datetime.datetime.now()
   alerts = fetch_alerts(args, gatekeeper_config)
+  print "Fetch took: %s" % (datetime.datetime.now() - start_time)
+
   data = { 'content': json.dumps(alerts) }
   for url in args.data_url:
     log.info('POST %s alerts to %s' % (len(alerts), url))
     requests.post(url, data=data)
-
-  print "Elapsed: %s" % (datetime.datetime.now() - start_time)
 
 
 if __name__ == '__main__':
