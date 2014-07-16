@@ -17,14 +17,13 @@ import urllib
 import urlparse
 import gatekeeper_extras
 
-# This is relative to build/scripts:
-# https://chromium.googlesource.com/chromium/tools/build/+/master/scripts
-BUILD_SCRIPTS_PATH = "/src/build/scripts"
-sys.path.append(BUILD_SCRIPTS_PATH)
-from slave import gatekeeper_ng_config
+import pipeline
+
+import gatekeeper_ng_config
 
 import reasons
 
+from google.appengine.api import urlfetch
 
 # Masters:
 # https://apis-explorer.appspot.com/apis-explorer/?base=https://chrome-infra-stats.appspot.com/_ah/api#p/stats/v1/stats.masters.list?_h=1&
@@ -44,9 +43,7 @@ def setup_logging():
 
 log, logging_handler = setup_logging()
 
-# FIXME: Pull from:
-# https://chromium.googlesource.com/chromium/tools/build/+/master/scripts/slave/gatekeeper.json?format=TEXT
-CONFIG_PATH = os.path.join(BUILD_SCRIPTS_PATH, 'slave', 'gatekeeper.json')
+GATEKEEPER_CONFIG = 'gatekeeper.json'
 
 # Success or Warnings or None (didn't run) don't count as 'failing'.
 NON_FAILING_RESULTS = (0, 1, None)
@@ -56,17 +53,24 @@ def master_name_from_url(master_url):
   return urlparse.urlparse(master_url).path.split('/')[-1]
 
 
-def fetch_master_json(master_url):
+def master_json_url(master_url):
   builders_url = 'https://chrome-build-extract.appspot.com/get_master/%s'
-  url = builders_url % master_name_from_url(master_url)
-  return requests.get(url).json()
+  return builders_url % master_name_from_url(master_url)
+
+
+def fetch_master_json(master_url):
+  url = master_json_url(master_url)
+  response = urlfetch.fetch(url, follow_redirects=False)
+  return json.loads(response.content)
 
 
 def builds_for_builder(master_url, builder_name):
   builds_url = 'https://chrome-build-extract.appspot.com/get_builds'
   master_name = master_name_from_url(master_url)
   params = { 'master': master_name, 'builder': builder_name }
-  return requests.get(builds_url, params=params).json()['builds']
+  url = "%s?%s" % (builds_url, urllib.urlencode(params))
+  response = urlfetch.fetch(url, follow_redirects=False)
+  return json.loads(response.content)['builds']
 
 
 # This effectively extracts the 'configuration' of the build
@@ -289,6 +293,51 @@ def fetch_alerts(args, gatekeeper_config):
 # Shuffle failures into (master:builder, [failure, failure])
 # Reduce
 
+class FetchJson(pipeline.Pipeline):
+  def run(self, url):
+    return reqeusts.get(url).json()
+
+
+class BuilderJob(pipeline.Pipeline):
+  output_names = ['failures']
+
+  def run(self, master_url, builder_name):
+    recent_builds = builds_for_builder(master_url, builder_name)
+    # if not recent_builds:
+    #   log.warn("No recent builds for %s, skipping." % builder_name)
+    #   return []
+
+    # build = recent_builds[0]
+    # failures = failures_for_build(build, master_url, builder_name)
+    # return [fill_in_transition(failure, build, recent_builds) for failure in failures]
+
+    self.fill(self.outputs.failures, [])
+
+
+class MasterJob(pipeline.Pipeline):
+  # output_names = ['builder_jobs']
+
+  def run(self, master_url):
+    master_json = fetch_master_json(master_url)
+    builder_jobs = []
+    for builder_name in master_json['builders']:
+      # Get active jobs.
+      builder_jobs.append( (yield BuilderJob(master_url, builder_name)) )
+
+
+class MainPipeline(pipeline.Pipeline):
+  def run(self):
+    gatekeeper = gatekeeper_ng_config.load_gatekeeper_config('gatekeeper.json')
+    master_urls = gatekeeper.keys()
+    master_jobs = []
+    for url in master_urls:
+      master_jobs.append( (yield MasterJob(url)) )
+
+
+  def finalized(self):
+    if not self.was_aborted:
+      logging.info('All done! Found %s results', self.outputs.default.value)
+
 
 def main(args):
   parser = argparse.ArgumentParser()
@@ -302,7 +351,7 @@ def main(args):
   else:
     requests_cache.install_cache(backend='memory')
 
-  gatekeeper_config = gatekeeper_ng_config.load_gatekeeper_config(CONFIG_PATH)
+  gatekeeper_config = gatekeeper_ng_config.load_gatekeeper_config('gatekeeper.json')
   alerts = fetch_alerts(args, gatekeeper_config)
   data = { 'content': json.dumps(alerts) }
   for url in args.data_url:

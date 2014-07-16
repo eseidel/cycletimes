@@ -4,6 +4,7 @@ import json
 import calendar
 import datetime
 import analysis
+import feeder
 
 
 class DateTimeEncoder(json.JSONEncoder):
@@ -93,7 +94,16 @@ class DataHandler(webapp2.RequestHandler):
         alert.put()
 
 
+class FeedHandler(webapp2.RequestHandler):
+    def get(self):
+        feed = feeder.MainPipeline()
+        feed.max_attempts = 1
+        feed.start()
+        self.redirect('/_ah/pipeline/status?root=%s' % feed.pipeline_id)
+
+
 app = webapp2.WSGIApplication([
     ('/data', DataHandler),
     ('/ignore', IgnoreHandler),
+    ('/feed', FeedHandler),
 ], debug=True)

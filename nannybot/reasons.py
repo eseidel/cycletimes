@@ -11,11 +11,7 @@ import urlparse
 import argparse
 import re
 
-# This is relative to build/scripts:
-# https://chromium.googlesource.com/chromium/tools/build/+/master/scripts
-BUILD_SCRIPTS_PATH = "/src/build/scripts"
-sys.path.append(BUILD_SCRIPTS_PATH)
-from common import gtest_utils
+import gtest_utils
 
 # Python logging is stupidly verbose to configure.
 def setup_logging():

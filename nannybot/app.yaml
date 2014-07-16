@@ -2,7 +2,7 @@ application: auto-sheriff
 version: 1
 runtime: python27
 api_version: 1
-threadsafe: true
+threadsafe: false
 
 handlers:
 - url: /
@@ -15,6 +15,8 @@ handlers:
 - url: /favicon.ico
   static_files: favicon.ico
   upload: favicon.ico
+- url: /_ah/pipeline(/.*)?
+  script: mapreduce/third_party/pipeline/handlers.py
 - url: /.*
   script: main.app
 
