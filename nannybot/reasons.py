@@ -198,11 +198,11 @@ class LayoutTestsSplitter(object):
       results = json.loads(json_string)
       passes, failures, flakes = decode_results(results)
       if failures:
-        return failures
-    except ValueError:
+        return ['%s:%s' % (name, types) for name, types in failures.items()]
+    except ValueError, e:
       print archive_step['urls']
       print html_results_url
-      print "Failed %s, at decode of: %s" % (jsonp_url, jsonp_string)
+      print "Failed %s, %s at decode of: %s" % (jsonp_url, e, jsonp_string)
 
     # Failed to split, just group with the general failures.
     return None
