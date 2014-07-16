@@ -5,16 +5,18 @@
 
 import argparse
 import collections
+import datetime
 import itertools
 import json
 import logging
 import operator
 import os.path
-import requests
-import requests_cache
 import sys
 import urllib
 import urlparse
+
+import requests
+import requests_cache
 import gatekeeper_extras
 
 # This is relative to build/scripts:
@@ -197,6 +199,7 @@ def failures_for_build(build, master_url, builder_name):
       'last_result_time': step['times'][1],
       'builder_name': builder_name,
       'step_name': step['name'],
+      'latest_revisions': revisions_from_build(build),
     }
     reasons = reasons_for_failure(step, build, builder_name, master_url)
     if not reasons:
@@ -302,12 +305,16 @@ def main(args):
   else:
     requests_cache.install_cache(backend='memory')
 
+  start_time = datetime.datetime.now()
+
   gatekeeper_config = gatekeeper_ng_config.load_gatekeeper_config(CONFIG_PATH)
   alerts = fetch_alerts(args, gatekeeper_config)
   data = { 'content': json.dumps(alerts) }
   for url in args.data_url:
     log.info('POST %s alerts to %s' % (len(alerts), url))
     requests.post(url, data=data)
+
+  print "Elapsed: %s" % (datetime.datetime.now() - start_time)
 
 
 if __name__ == '__main__':
