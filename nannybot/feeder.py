@@ -10,15 +10,16 @@ import itertools
 import json
 import logging
 import operator
-import os
+import os.path
 import sys
 import urllib
-import urlparse
 import analysis
 
 import requests
 import requests_cache
 import gatekeeper_extras
+
+import buildbot
 
 # This is relative to build/scripts:
 # https://chromium.googlesource.com/chromium/tools/build/+/master/scripts
@@ -27,6 +28,8 @@ sys.path.append(BUILD_SCRIPTS_PATH)
 from slave import gatekeeper_ng_config
 
 import reasons
+
+CACHE_PATH = '/src/build_cache'
 
 
 # Python logging is stupidly verbose to configure.
@@ -49,132 +52,6 @@ CONFIG_PATH = os.path.join(BUILD_SCRIPTS_PATH, 'slave', 'gatekeeper.json')
 
 # Success or Warnings or None (didn't run) don't count as 'failing'.
 NON_FAILING_RESULTS = (0, 1, None)
-
-
-def master_name_from_url(master_url):
-  return urlparse.urlparse(master_url).path.split('/')[-1]
-
-
-def fetch_master_json(master_url):
-  builders_url = 'https://chrome-build-extract.appspot.com/get_master/%s'
-  url = builders_url % master_name_from_url(master_url)
-  return requests.get(url).json()
-
-
-def cache_path(master_url, builder_name, build_number):
-  master_name = master_name_from_url(master_url)
-  return '/src/build_cache/%s/%s/%s.json' % (master_name, builder_name, build_number)
-
-
-def build_from_cache(master_url, builder_name, build_number):
-  path = cache_path(master_url, builder_name, build_number)
-  if not os.path.exists(path):
-    return None
-  with open(path) as cached:
-    return json.load(cached)
-
-
-def cache_build_at_path(build_json, cache_path):
-  cache_dir = os.path.dirname(cache_path)
-  if not os.path.exists(cache_dir):
-    os.makedirs(cache_dir)
-  with open(cache_path, 'w') as cached:
-    cached.write(json.dumps(build_json))
-
-
-# FIXME: I don't think master_url or  builder_name are needed.
-def cache_build(master_url, builder_name, build_number, build_json):
-  path = cache_path(master_url, builder_name, build_number)
-  cache_build_at_path(build_json, path)
-
-
-def prefill_builds_cache(master_url, builder_name):
-  builds_url = 'https://chrome-build-extract.appspot.com/get_builds'
-  master_name = master_name_from_url(master_url)
-  params = { 'master': master_name, 'builder': builder_name }
-  response = requests.get(builds_url, params=params)
-  builds = response.json()['builds']
-  for build in builds:
-    if not build.get('number'):
-      index = builds.index(build)
-      log.error('build at index %s in %s missing number?' % (index, response.url))
-      continue
-    build_number = build['number']
-    cache_build(master_url, builder_name, build_number, build)
-  build_numbers = map(operator.itemgetter('number'), builds)
-  # log.debug('Prefilled %s for %s %s' % (re_range(build_numbers), master_url, builder_name))
-  return build_numbers
-
-
-def fetch_and_cache_build(url, cache_key):
-  log.debug('Fetching %s.' % url)
-  try:
-    build = requests.get(url).json()
-    # Don't cache builds which are just errors?
-    if build.get('number'):
-      if build.get('eta') is None:
-        cache_build_at_path(build, cache_key)
-      else:
-        log.debug('Not caching in-progress build from %s.')
-      return build
-  except ValueError, e:
-    log.error('Error %s: %s' % (url, e))
-
-
-def fetch_build_json(master_url, builder_name, build_number):
-  build = build_from_cache(master_url, builder_name, build_number)
-  # I accidentally stored some error builds and incomplete builds before.
-  if build and (not build.get('number') or build.get('eta')):
-    log.warn('Refetching %s %s %s' % (master_url, builder_name, build_number))
-    build = None
-
-  cache_key = cache_path(master_url, builder_name, build_number)
-  master_name = master_name_from_url(master_url)
-
-  cbe_url = "https://chrome-build-extract.appspot.com/p/%s/builders/%s/builds/%s?json=1" % (
-    master_name, builder_name, build_number)
-  if not build:
-    build = fetch_and_cache_build(cbe_url, cache_key)
-
-  if not build:
-    log.warn("CBE failed, failover to buildbot %s" % cbe_url)
-    buildbot_url = "https://build.chromium.org/p/%s/json/builders/%s/builds/%s" % (
-      master_name, builder_name, build_number)
-    build = fetch_and_cache_build(buildbot_url, cache_key)
-
-  return build
-
-
-# This effectively extracts the 'configuration' of the build
-# we could extend this beyond repo versions in the future.
-def revisions_from_build(build_json):
-  def _property_value(build_json, property_name):
-    for prop_tuple in build_json['properties']:
-      if prop_tuple[0] == property_name:
-        return prop_tuple[1]
-
-  REVISION_VARIABLES = [
-    ('chromium', 'got_revision'),
-    ('blink', 'got_webkit_revision'),
-    ('v8', 'got_v8_revision'),
-    ('nacl', 'got_nacl_revision'),
-    # Skia, for whatever reason, isn't exposed in the buildbot properties so
-    # don't bother to include it here.
-  ]
-
-  revisions = {}
-  for repo_name, buildbot_property in REVISION_VARIABLES:
-    # This is epicly stupid:  'tester' builders have the wrong
-    # revision for 'got_foo_revision' and we have to use
-    # parent_got_foo_revision instead, but non-tester builders
-    # don't have the parent_ versions, so we have to fall back
-    # to got_foo_revision in those cases!
-    # Don't even think about using 'revision' that's wrong too.
-    revision = _property_value(build_json, 'parent_' + buildbot_property)
-    if not revision:
-      revision = _property_value(build_json, buildbot_property)
-    revisions[repo_name] = revision
-  return revisions
 
 
 # http://stackoverflow.com/questions/9470611/how-to-do-an-inverse-range-i-e-create-a-compact-range-based-on-a-set-of-numb/9471386#9471386
@@ -275,7 +152,7 @@ def failures_for_build(build, master_url, builder_name):
       'last_result_time': step['times'][1],
       'builder_name': builder_name,
       'step_name': step['name'],
-      'latest_revisions': revisions_from_build(build),
+      'latest_revisions': buildbot.revisions_from_build(build),
     }
     reasons = reasons_for_failure(step, build, builder_name, master_url)
     if not reasons:
@@ -296,8 +173,8 @@ def fill_in_transition(failure, build, recent_builds):
   last_pass_build, first_fail_build, fail_count = \
     compute_transition_and_failure_count(failure, build, recent_builds)
 
-  failing = revisions_from_build(first_fail_build)
-  passing = revisions_from_build(last_pass_build) if last_pass_build else None
+  failing = buildbot.revisions_from_build(first_fail_build)
+  passing = buildbot.revisions_from_build(last_pass_build) if last_pass_build else None
 
   failure.update({
     'failing_build_count': fail_count,
@@ -309,20 +186,21 @@ def fill_in_transition(failure, build, recent_builds):
   return failure
 
 
-def alerts_for_builder(master_url, builder_name, recent_build_ids, active_builds):
+def alerts_for_builder(cache, master_url, builder_name, recent_build_ids, active_builds):
   recent_build_ids = sorted(recent_build_ids, reverse=True)
 
   active_build_ids = [b['number'] for b in active_builds]
   # recent_build_ids includes active ones.
   recent_build_ids = [b for b in recent_build_ids if b not in active_build_ids]
 
-  if not build_from_cache(master_url, builder_name, recent_build_ids[0]):
-    prefill_builds_cache(master_url, builder_name)
+  cache_key = buildbot.cache_key_for_build(master_url, builder_name, recent_build_ids[0])
+  if not cache.get(cache_key):
+    buildbot.prefill_builds_cache(cache, master_url, builder_name)
 
   # Limit to 100 for now to match the prefill.
   recent_build_ids = recent_build_ids[:100]
 
-  recent_builds = [fetch_build_json(master_url, builder_name, num) for num in recent_build_ids]
+  recent_builds = [buildbot.fetch_build_json(cache, master_url, builder_name, num) for num in recent_build_ids]
   # Some fetches may fail.
   recent_builds = filter(None, recent_builds)
   if not recent_builds:
@@ -334,7 +212,7 @@ def alerts_for_builder(master_url, builder_name, recent_build_ids, active_builds
   return [fill_in_transition(failure, build, recent_builds) for failure in failures]
 
 
-def alerts_for_master(master_url, master_json):
+def alerts_for_master(cache, master_url, master_json):
   active_builds = []
   for slave in master_json['slaves'].values():
     for build in slave['runningBuilds']:
@@ -345,9 +223,9 @@ def alerts_for_master(master_url, master_json):
     actives = filter(lambda build: build['builderName'] == builder_name, active_builds)
     # cachedBuilds will include runningBuilds.
     recent_build_ids = builder_json['cachedBuilds']
-    master_name = master_name_from_url(master_url)
+    master_name = buildbot.master_name_from_url(master_url)
     log.debug("%s %s" % (master_name, builder_name))
-    alerts.extend(alerts_for_builder(master_url, builder_name, recent_build_ids, actives))
+    alerts.extend(alerts_for_builder(cache, master_url, builder_name, recent_build_ids, actives))
 
   return alerts
 
@@ -391,18 +269,6 @@ def fetch_master_urls(gatekeeper, args):
   return master_urls
 
 
-def latest_revisions_for_master(master_url, master_json):
-  latest_revisions = collections.defaultdict(dict)
-  master_name = master_name_from_url(master_url)
-  for builder_name, builder_json in master_json['builders'].items():
-    # recent_builds can include current builds
-    recent_builds = set(builder_json['cachedBuilds'])
-    active_builds = set(builder_json['currentBuilds'])
-    last_finished_id = sorted(recent_builds - active_builds, reverse=True)[0]
-    last_build = fetch_build_json(master_url, builder_name, last_finished_id)
-    latest_revisions[master_name][builder_name] = revisions_from_build(last_build)
-  return latest_revisions
-
 def main(args):
   parser = argparse.ArgumentParser()
   parser.add_argument('data_url', action='store', nargs='*')
@@ -424,16 +290,19 @@ def main(args):
 
   latest_revisions = {}
 
+  cache = buildbot.BuildCache(CACHE_PATH)
+
   alerts = []
   for master_url in master_urls:
-    master_json = fetch_master_json(master_url)
-    master_alerts = alerts_for_master(master_url, master_json)
+    master_json = buildbot.fetch_master_json(master_url)
+    master_alerts = alerts_for_master(cache, master_url, master_json)
     alerts.extend(master_alerts)
 
     # FIXME: This doesn't really belong here. garden-o-matic wants
     # this data and we happen to have the builder json cached at
     # this point so it's cheap to compute.
-    latest_revisions.update(latest_revisions_for_master(master_url, master_json))
+    revisions = buildbot.latest_revisions_for_master(cache, master_url, master_json)
+    latest_revisions.update(revisions)
 
 
   print "Fetch took: %s" % (datetime.datetime.now() - start_time)
