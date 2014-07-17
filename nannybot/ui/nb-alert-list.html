@@ -1,0 +1,68 @@
+<polymer-element name="nb-alert-list" attributes='failures'>
+  <template>
+    <sortable-table id='table' data='{{failures}}' rowTemplate="rowTemplate" style='width: 100%'>
+      <template id="rowTemplate">
+        <style>
+          .fail_link { background-color: #FCC;}
+          .pass_link { background-color: #CFC;}
+        </style>
+        <td>{{record.row.master_url | master_name }}</td>
+        <td style='max-width: 150px; overflow: hidden'>
+          <a href='{{ record.row | builder_url }}'>{{record.row.builder_name}}</a>
+        </td>
+        <td>{{record.row.failing_build_count}}</td>
+        <td style='max-width: 300px; overflow: hidden; word-wrap: break-word;'>
+          <a href='{{ record.row | stdio_url(record.row.failing_build) }}'>{{record.row.step_name}}</a>
+          <br>
+          <template if="{{ record.row.reason }}">
+            <a href="{{ record.row.reason | flakiness_dashboard_url(record.row.step_name) }}">
+              {{record.row.reason }}
+            </a>
+          </template>
+        </td>
+        <td>
+          <a class='fail_link' href="{{ record.row | build_url(record.row.failing_build) }}">F</a>
+          <template if='{{ record.row.passing_build }}'>
+            <a class='pass_link' href="{{ record.row | build_url(record.row.passing_build) }}">P</a>
+          </template>
+        </td>
+        <td style='max-width: 200px; overflow: hidden'>
+          <nb-changelogs passing="{{ record.row.passing_revisions }}" failing="{{record.row.failing_revisions}}"></nb-changelogs>
+        </td>
+        <td>{{ record.row.last_result_time | since_string }}</td>
+        <td>{{ record.row.would_close_tree }}</td>
+      </template>
+    </sortable-table>
+  </template>
+  <script>
+  Polymer('nb-alert-list', {
+    ready: function() {
+      this.$.table.columns = [
+        { title: 'master', name: 'master_url' },
+        { title: 'builder', name: 'builder_name' },
+        { title: 'times', name: 'failing_build_count' },
+        { title: 'failure', name: 'reason' },
+        { title: 'edges', name: 'failing_build' }, // bad sort criteria.
+        { title: 'changelogs', name: 'failing_revisions' }, // also bad.
+        { title: 'since', name: 'last_result_time' },
+        { title: 'closer', name: 'would_close_tree' },
+      ];
+      this.$.table.sortColumn = this.getQueryParameter('sortColumn');
+      this.$.table.sortDescending = this.getQueryParameter('sortDescending');
+    },
+    getQueryParameter: function(name) {
+      name = name.replace(/[\[]/, "\\[").replace(/[\]]/, "\\]");
+      var regex = new RegExp("[\\?&]" + name + "=([^&#]*)");
+      var results = regex.exec(window.location.search);
+      return results == null ? "" : decodeURIComponent(results[1].replace(/\+/g, " "));
+    },
+    observe: {
+    '$.table.sortColumn': 'sortColumnChanged'
+    },
+    sortColumnChanged: function(oldValue, newValue) {
+      // FIXME: Save the sort column in the url.
+      console.log(newValue);
+    }
+  });
+  </script>
+</polymer-element>

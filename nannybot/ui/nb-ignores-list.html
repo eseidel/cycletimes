@@ -1,0 +1,20 @@
+<polymer-element name="nb-ignores-list" attributes='ignores' noscript>
+<template>
+    <table>
+    <tr><th>pattern</th><th>added</th></tr>
+    <template repeat="{{ ignore in ignores }}">
+    <tr>
+    <td>{{ignore.pattern}}</td>
+    <td>{{ignore.date | since_string}}</td>
+    <td>
+      <form action='/ignore' method='post'>
+        <input type='hidden' name='action' value='delete'>
+        <input type='hidden' name='key' value='{{ignore.key}}'>
+        <input type='submit' value='delete'>
+      </form>
+    </td>
+    </tr>
+    </template>
+    </table>
+</template>
+</polymer-element>

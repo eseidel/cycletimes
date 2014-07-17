@@ -14,216 +14,19 @@
     font-family: 'RobotoDraft', sans-serif;
   }
   </style>
+  <!-- FIXME: Should ui/filters be included by the various imports? -->
+  <script src='ui/filters.js'></script>
   <link rel="import" href="components/font-roboto/roboto.html">
   <link rel="import" href="components/polymer/polymer.html">
   <link rel="import" href="components/core-ajax/core-ajax.html">
   <link rel="import" href="components/sortable-table/sortable-table.html">
+  <link rel="import" href="ui/nb-changelogs.html">
+  <link rel="import" href="ui/nb-alert-list.html">
+  <link rel="import" href="ui/nb-grouped-alert-list.html">
   <link rel="shortcut icon" href="/favicon.ico">
 </head>
 
 <body unresolved touch-action="auto">
-
-<polymer-element name="nb-changelogs" attributes="revision_names passing failing">
-  <template>
-    <template if="{{passing}}">
-      <template repeat="{{ name in revision_names }}">
-        <template if="{{name | commits_differ(passing, failing) }}">
-          <a href='{{ name | changelog_url(passing, failing) }}' title='{{ name | commit_id(passing) }}:{{ name | commit_id(failing)}}'>{{ name | short_name }}</a>
-        </template>
-      </template>
-    </template>
-    <template if="{{ !passing }}">
-     before
-      <template repeat="{{ name in revision_names }}">
-        <a href="{{ name | change_url(failing) }}">{{ name | short_name }}</a>
-      </template>
-    </template>
-  </template>
-  <script>
-  Polymer('nb-changelogs', {
-    failingChanged: function() {
-      this.revision_names = Object.keys(this.failing);
-    },
-    commits_differ: function(name, passing, failing) {
-      return passing[name] != failing[name];
-    },
-    changelog_url: function(name, passing, failing) {
-      return repositories.changelog_url(name, passing[name], failing[name]);
-    },
-    commit_id: function(name, revisions_dict) {
-      return revisions_dict[name];
-    },
-    change_url: function(name, revisions_dict) {
-      return repositories.change_url(name, revisions_dict[name]);
-    },
-    short_name: repositories.short_name,
-  });
-  </script>
-</polymer-element>
-
-<polymer-element name="nb-alert-list" attributes='failures'>
-  <template>
-    <sortable-table id='table' data='{{failures}}' rowTemplate="rowTemplate" style='width: 100%'>
-      <template id="rowTemplate">
-        <style>
-          .fail_link { background-color: #FCC;}
-          .pass_link { background-color: #CFC;}
-        </style>
-        <td>{{record.row.master_url | master_name }}</td>
-        <td style='max-width: 150px; overflow: hidden'>
-          <a href='{{ record.row | builder_url }}'>{{record.row.builder_name}}</a>
-        </td>
-        <td>{{record.row.failing_build_count}}</td>
-        <td style='max-width: 300px; overflow: hidden; word-wrap: break-word;'>
-          <a href='{{ record.row | stdio_url(record.row.failing_build) }}'>{{record.row.step_name}}</a>
-          <br>
-          <template if="{{ record.row.reason }}">
-            <a href="{{ record.row.reason | flakiness_dashboard_url(record.row.step_name) }}">
-              {{record.row.reason }}
-            </a>
-          </template>
-        </td>
-        <td>
-          <a class='fail_link' href="{{ record.row | build_url(record.row.failing_build) }}">F</a>
-          <template if='{{ record.row.passing_build }}'>
-            <a class='pass_link' href="{{ record.row | build_url(record.row.passing_build) }}">P</a>
-          </template>
-        </td>
-        <td style='max-width: 200px; overflow: hidden'>
-          <nb-changelogs passing="{{ record.row.passing_revisions }}" failing="{{record.row.failing_revisions}}"></nb-changelogs>
-        </td>
-        <td>{{ record.row.last_result_time | since_string }}</td>
-        <td>{{ record.row.would_close_tree }}</td>
-      </template>
-    </sortable-table>
-  </template>
-  <script>
-  Polymer('nb-alert-list', {
-    ready: function() {
-      this.$.table.columns = [
-        { title: 'master', name: 'master_url' },
-        { title: 'builder', name: 'builder_name' },
-        { title: 'times', name: 'failing_build_count' },
-        { title: 'failure', name: 'reason' },
-        { title: 'edges', name: 'failing_build' }, // bad sort criteria.
-        { title: 'changelogs', name: 'failing_revisions' }, // also bad.
-        { title: 'since', name: 'last_result_time' },
-        { title: 'closer', name: 'would_close_tree' },
-      ];
-      this.$.table.sortColumn = this.getQueryParameter('sortColumn');
-      this.$.table.sortDescending = this.getQueryParameter('sortDescending');
-    },
-    getQueryParameter: function(name) {
-      name = name.replace(/[\[]/, "\\[").replace(/[\]]/, "\\]");
-      var regex = new RegExp("[\\?&]" + name + "=([^&#]*)");
-      var results = regex.exec(window.location.search);
-      return results == null ? "" : decodeURIComponent(results[1].replace(/\+/g, " "));
-    },
-    observe: {
-    '$.table.sortColumn': 'sortColumnChanged'
-    },
-    sortColumnChanged: function(oldValue, newValue) {
-      // FIXME: Save the sort column in the url.
-      console.log(newValue);
-    }
-  });
-  </script>
-</polymer-element>
-
-<polymer-element name='nb-grouped-alert-list' attributes='failures groups'>
-<template>
-  <table>
-  <tr><th>reason</th><th>blame</th><th>builders</th></tr>
-  <template repeat="{{ group in groups }}">
-    <tr>
-      <td>
-        {{ group.failures[0].step_name }}
-        <template repeat="{{ reason in group.reasons }}">
-          <template if="{{ reason }}">
-            <!-- FIXME this will be wrong if there are multiple step names! -->
-            <div>
-            <a href="{{ reason | flakiness_dashboard_url(group.failures[0].step_name) }}">
-              {{reason }}
-            </a>
-            </div>
-          </template>
-        </template>
-      </td>
-      <td>
-        <template if="{{ group.likely_revisions.length < 10}}">
-          <template repeat="{{ revision in group.likely_revisions }}">
-            <div>
-              <a href="{{ revision | change_url }}">{{ revision }}</a>
-            </div>
-          </template>
-        </template>
-        <template if="{{ group.likely_revisions.length >= 10 }}">
-          <nb-changelogs passing="{{ group.merged_last_passing }}" failing="{{ group.merged_first_failing }}"></nb-changelogs>
-        </template>
-      </td>
-      <td>
-        <template repeat="{{ builder_name in group.builder_names }}">
-          <span style='border: 1px solid blue'>{{ builder_name }}</span>
-        </template>
-      </td>
-    </tr>
-  </template>
-  </table>
-</template>
-<script>
-Polymer('nb-grouped-alert-list', {
-  change_url: function(value) {
-    var args = value.split(':');
-    return repositories.change_url(args[0], args[1]);
-  },
-  groupsChanged: function(oldValue, newValue) {
-    // This is kinda hacky to modify newValue.
-    newValue.forEach(function(group) {
-      var reasons = {};
-      var builder_names = {};
-      group.failures = []
-      group.failure_keys.forEach(function(failure_key) {
-        var failure = this.failureForKey(failure_key);
-        group.failures.push(failure);
-        if (failure.reason)
-          reasons[failure.reason] = 1;
-        builder_names[failure.builder_name] = 1;
-      }, this);
-      group.reasons = Object.keys(reasons);
-      group.builder_names = Object.keys(builder_names);
-    }, this);
-  },
-  failureForKey: function(key) {
-    for (var x = 0; x < this.failures.length; x++) {
-      var failure = this.failures[x];
-      if (failure.key == key)
-        return failure
-    }
-  }
-});
-</script>
-</polymer-element>
-
-<polymer-element name="nb-ignores-list" attributes='ignores' noscript>
-<template>
-    <table>
-    <tr><th>pattern</th><th>added</th></tr>
-    <template repeat="{{ ignore in ignores }}">
-    <tr>
-    <td>{{ignore.pattern}}</td>
-    <td>{{ignore.date | since_string}}</td>
-    <td>
-      <form action='/ignore' method='post'>
-        <input type='hidden' name='action' value='delete'>
-        <input type='hidden' name='key' value='{{ignore.key}}'>
-        <input type='submit' value='delete'>
-      </form>
-    </td>
-    </tr>
-    </template>
-    </table>
-</template>
-</polymer-element>
 
 <polymer-element name="nb-main" attributes='failures filteredFailures displayedFailures'>
 <template>
@@ -260,47 +63,6 @@ Polymer('nb-main', {
 });
 </script>
 </polymer-element>
-
-<script>
-// Needed to make filters visible inside sortable-table.
-  PolymerExpressions.prototype.since_string = function(value) {
-    // Buildbot talks to us in seconds, js expect milliseconds
-    date = new Date(value * 1000.0);
-    return humanized_time_span(date);
-  }
-  PolymerExpressions.prototype.falsy_to_empty = function(value) {
-    return value ? value : '';
-  }
-  PolymerExpressions.prototype.master_name = function(value) {
-    if (!value)
-      return 'foo';
-    var url_parts = value.split('/');
-    var long_name = url_parts[url_parts.length - 1];
-    if (long_name.indexOf('chromium.') == 0) {
-      return long_name.slice('chromium.'.length);
-    }
-    return long_name;
-  }
-  PolymerExpressions.prototype.builder_url = function(failure) {
-    return failure.master_url + '/builders/' + failure.builder_name;
-  }
-  PolymerExpressions.prototype.build_url = function(failure, build_number) {
-    return PolymerExpressions.prototype.builder_url(failure) + '/builds/' + build_number;
-  }
-  PolymerExpressions.prototype.step_url = function(failure, build_number) {
-    return PolymerExpressions.prototype.build_url(failure, build_number) + '/steps/' + failure.step_name;
-  }
-  PolymerExpressions.prototype.stdio_url = function(failure, build_number) {
-    return PolymerExpressions.prototype.step_url(failure, build_number) + '/logs/stdio';
-  }
-  PolymerExpressions.prototype.flakiness_dashboard_url = function(test_name, step_name) {
-    if (!test_name)
-      return '';
-    if (step_name.indexOf('test') == -1)
-      return '';
-    return "http://test-results.appspot.com/dashboards/flakiness_dashboard.html#testType=" + step_name + "&tests=" + encodeURIComponent(test_name);
-  }
-</script>
 <nb-main></nb-main>
 
 <form action='/ignore' method='post'>

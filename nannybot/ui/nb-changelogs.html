@@ -1,0 +1,37 @@
+<polymer-element name="nb-changelogs" attributes="revision_names passing failing">
+  <template>
+    <template if="{{passing}}">
+      <template repeat="{{ name in revision_names }}">
+        <template if="{{name | commits_differ(passing, failing) }}">
+          <a href='{{ name | changelog_url(passing, failing) }}' title='{{ name | commit_id(passing) }}:{{ name | commit_id(failing)}}'>{{ name | short_name }}</a>
+        </template>
+      </template>
+    </template>
+    <template if="{{ !passing }}">
+     before
+      <template repeat="{{ name in revision_names }}">
+        <a href="{{ name | change_url(failing) }}">{{ name | short_name }}</a>
+      </template>
+    </template>
+  </template>
+  <script>
+  Polymer('nb-changelogs', {
+    failingChanged: function() {
+      this.revision_names = Object.keys(this.failing);
+    },
+    commits_differ: function(name, passing, failing) {
+      return passing[name] != failing[name];
+    },
+    changelog_url: function(name, passing, failing) {
+      return repositories.changelog_url(name, passing[name], failing[name]);
+    },
+    commit_id: function(name, revisions_dict) {
+      return revisions_dict[name];
+    },
+    change_url: function(name, revisions_dict) {
+      return repositories.change_url(name, revisions_dict[name]);
+    },
+    short_name: repositories.short_name,
+  });
+  </script>
+</polymer-element>
