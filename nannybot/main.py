@@ -3,7 +3,6 @@ from google.appengine.ext import ndb
 import json
 import calendar
 import datetime
-import analysis
 
 
 class DateTimeEncoder(json.JSONEncoder):
@@ -66,22 +65,19 @@ class DataHandler(webapp2.RequestHandler):
         entries = query.fetch(1)
         response_json = {}
         if entries:
-            alerts = json.loads(entries[0].content)
-            alerts = analysis.assign_keys(alerts)
+            response_json = json.loads(entries[0].content)
             ignores = IgnoreRule.query().fetch()
 
             def add_ignores(alert):
                 alert['ignored_by'] = [ignore.key.id() for ignore in ignores if ignore.matches(alert)]
                 return alert
 
-            reason_groups = analysis.group_by_reason(alerts)
-            range_groups = analysis.merge_by_range(reason_groups)
-            response_json = {
+            response_json.update({
                 'date': entries[0].date,
-                'content': map(add_ignores, alerts),
+                # FIXME: We should take an ignores param instead of always applying.
+                'alerts': map(add_ignores, response_json['alerts']),
                 'ignores': map(IgnoreRule.dict_with_key, ignores),
-                'reason_groups': range_groups,
-            }
+            })
 
         self.response.headers.add_header("Access-Control-Allow-Origin", "*")
         self.response.headers['Content-Type'] = 'application/json'

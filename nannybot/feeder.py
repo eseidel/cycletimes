@@ -14,6 +14,7 @@ import os
 import sys
 import urllib
 import urlparse
+import analysis
 
 import requests
 import requests_cache
@@ -406,7 +407,14 @@ def main(args):
   alerts = fetch_alerts(args, gatekeeper_config)
   print "Fetch took: %s" % (datetime.datetime.now() - start_time)
 
-  data = { 'content': json.dumps(alerts) }
+  alerts = analysis.assign_keys(alerts)
+  reason_groups = analysis.group_by_reason(alerts)
+  range_groups = analysis.merge_by_range(reason_groups)
+  data = { 'content': json.dumps({
+      'alerts': alerts,
+      'reason_groups': reason_groups,
+      'range_groups': range_groups,
+  })}
   for url in args.data_url:
     log.info('POST %s alerts to %s' % (len(alerts), url))
     requests.post(url, data=data)
