@@ -254,7 +254,7 @@ Polymer('nb-main', {
     this.filteredFailures = this.failures.filter(function(failure) { return !failure.ignored_by.length });
     // Could have a check-box to toggle these.
     this.displayedFailures = this.filteredFailures;
-    this.grouped_alerts = newValue.reason_groups;
+    this.grouped_alerts = newValue.range_groups;
     this.grouped_alerts.sort(function(a, b) { return a.sort_key.localeCompare(b.sort_key); })
   },
 });
