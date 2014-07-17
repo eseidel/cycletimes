@@ -182,6 +182,8 @@ class LayoutTestsSplitter(object):
     if not html_results_url:
       html_results_url = archive_step['urls'].get('results')
 
+    # FIXME: This can happen when the webkit_tests step has an exception
+    # unclear if we want to special case that and not log here.
     if not html_results_url:
       log.warn('No results url for archive step in %s' % url_to_build)
       print json.dumps(archive_step, indent=1)

@@ -28,9 +28,6 @@ from slave import gatekeeper_ng_config
 
 import reasons
 
-# Masters:
-# https://apis-explorer.appspot.com/apis-explorer/?base=https://chrome-infra-stats.appspot.com/_ah/api#p/stats/v1/stats.masters.list?_h=1&
-
 
 # Python logging is stupidly verbose to configure.
 def setup_logging():
@@ -336,10 +333,7 @@ def alerts_for_builder(master_url, builder_name, recent_build_ids, active_builds
   return [fill_in_transition(failure, build, recent_builds) for failure in failures]
 
 
-def alerts_for_master(master_url, master_config):
-  master_json = fetch_master_json(master_url)
-  excluded_builders = gatekeeper_extras.excluded_builders(master_config)
-
+def alerts_for_master(master_url, master_json):
   active_builds = []
   for slave in master_json['slaves'].values():
     for build in slave['runningBuilds']:
@@ -347,9 +341,6 @@ def alerts_for_master(master_url, master_config):
 
   alerts = []
   for builder_name, builder_json in master_json['builders'].items():
-    if builder_name in excluded_builders:
-      continue
-
     actives = filter(lambda build: build['builderName'] == builder_name, active_builds)
     # cachedBuilds will include runningBuilds.
     recent_build_ids = builder_json['cachedBuilds']
@@ -357,20 +348,6 @@ def alerts_for_master(master_url, master_config):
     log.debug("%s %s" % (master_name, builder_name))
     alerts.extend(alerts_for_builder(master_url, builder_name, recent_build_ids, actives))
 
-  for alert in alerts:
-    alert['would_close_tree'] = \
-      gatekeeper_extras.would_close_tree(master_config,
-        alert['builder_name'], alert['step_name'])
-
-  return alerts
-
-
-def fetch_alerts(args, gatekeeper_config):
-  alerts = []
-  for url, config in gatekeeper_config.items():
-    if args.master_filter and args.master_filter not in url:
-      continue
-    alerts.extend(alerts_for_master(url, config))
   return alerts
 
 
@@ -385,6 +362,45 @@ def fetch_alerts(args, gatekeeper_config):
 # Shuffle failures into (master:builder, [failure, failure])
 # Reduce
 
+
+def apply_gatekeeper_rules(alerts, gatekeeper):
+  filtered_alerts = []
+  for alert in alerts:
+    config = gatekeeper.get(alert['master_url'])
+    if not config:
+      # Unclear if this should be set or not?
+      # alert['would_close_tree'] = False
+      filtered_alerts.append(alert)
+      continue
+    excluded_builders = gatekeeper_extras.excluded_builders(config)
+    if alert['builder_name'] in excluded_builders:
+      continue
+    alert['would_close_tree'] = \
+      gatekeeper_extras.would_close_tree(config, alert['builder_name'], alert['step_name'])
+    filtered_alerts.append(alert)
+  return filtered_alerts
+
+
+def fetch_master_urls(gatekeeper, args):
+  # Currently using gatekeeper.json, but could use:
+  # https://apis-explorer.appspot.com/apis-explorer/?base=https://chrome-infra-stats.appspot.com/_ah/api#p/stats/v1/stats.masters.list?_h=1&
+  master_urls = gatekeeper.keys()
+  if args.master_filter:
+    master_urls = [url for url in master_urls if args.master_filter not in url]
+  return master_urls
+
+
+def latest_revisions_for_master(master_url, master_json):
+  latest_revisions = collections.defaultdict(dict)
+  master_name = master_name_from_url(master_url)
+  for builder_name, builder_json in master_json['builders'].items():
+    # recent_builds can include current builds
+    recent_builds = set(builder_json['cachedBuilds'])
+    active_builds = set(builder_json['currentBuilds'])
+    last_finished_id = sorted(recent_builds - active_builds, reverse=True)[0]
+    last_build = fetch_build_json(master_url, builder_name, last_finished_id)
+    latest_revisions[master_name][builder_name] = revisions_from_build(last_build)
+  return latest_revisions
 
 def main(args):
   parser = argparse.ArgumentParser()
@@ -401,11 +417,27 @@ def main(args):
   else:
     requests_cache.install_cache(backend='memory')
 
-  gatekeeper_config = gatekeeper_ng_config.load_gatekeeper_config(CONFIG_PATH)
-
+  gatekeeper = gatekeeper_ng_config.load_gatekeeper_config(CONFIG_PATH)
+  master_urls = fetch_master_urls(gatekeeper, args)
   start_time = datetime.datetime.now()
-  alerts = fetch_alerts(args, gatekeeper_config)
+
+  latest_revisions = {}
+
+  alerts = []
+  for master_url in master_urls:
+    master_json = fetch_master_json(master_url)
+    master_alerts = alerts_for_master(master_url, master_json)
+    alerts.extend(master_alerts)
+
+    # FIXME: This doesn't really belong here. garden-o-matic wants
+    # this data and we happen to have the builder json cached at
+    # this point so it's cheap to compute.
+    latest_revisions.update(latest_revisions_for_master(master_url, master_json))
+
+
   print "Fetch took: %s" % (datetime.datetime.now() - start_time)
+
+  alerts = apply_gatekeeper_rules(alerts, gatekeeper)
 
   alerts = analysis.assign_keys(alerts)
   reason_groups = analysis.group_by_reason(alerts)
@@ -414,6 +446,7 @@ def main(args):
       'alerts': alerts,
       'reason_groups': reason_groups,
       'range_groups': range_groups,
+      'latest_revisions': latest_revisions,
   })}
   for url in args.data_url:
     log.info('POST %s alerts to %s' % (len(alerts), url))
