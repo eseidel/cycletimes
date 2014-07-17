@@ -107,6 +107,7 @@ def prefill_builds_cache(master_url, builder_name):
 
 
 def fetch_and_cache_build(url, cache_key):
+  log.debug('Fetching %s.' % url)
   try:
     build = requests.get(url).json()
     # Don't cache builds which are just errors?
