@@ -4,22 +4,21 @@
 # found in the LICENSE file.
 
 import argparse
-import collections
 import datetime
-import itertools
 import json
 import logging
 import operator
 import os.path
 import sys
-import urllib
-import analysis
 
 import requests
 import requests_cache
-import gatekeeper_extras
 
+import analysis
 import buildbot
+import gatekeeper_extras
+import reasons
+import string_helpers
 
 # This is relative to build/scripts:
 # https://chromium.googlesource.com/chromium/tools/build/+/master/scripts
@@ -27,7 +26,6 @@ BUILD_SCRIPTS_PATH = "/src/build/scripts"
 sys.path.append(BUILD_SCRIPTS_PATH)
 from slave import gatekeeper_ng_config
 
-import reasons
 
 CACHE_PATH = '/src/build_cache'
 
@@ -52,22 +50,6 @@ CONFIG_PATH = os.path.join(BUILD_SCRIPTS_PATH, 'slave', 'gatekeeper.json')
 
 # Success or Warnings or None (didn't run) don't count as 'failing'.
 NON_FAILING_RESULTS = (0, 1, None)
-
-
-# http://stackoverflow.com/questions/9470611/how-to-do-an-inverse-range-i-e-create-a-compact-range-based-on-a-set-of-numb/9471386#9471386
-def re_range(lst):
-    def sub(x):
-        return x[1] - x[0]
-
-    ranges = []
-    for k, iterable in itertools.groupby(enumerate(sorted(lst)), sub):
-         rng = list(iterable)
-         if len(rng) == 1:
-             s = str(rng[0][1])
-         else:
-             s = "%s-%s" % (rng[0][1], rng[-1][1])
-         ranges.append(s)
-    return ', '.join(ranges)
 
 
 def compute_transition_and_failure_count(failure, build, recent_builds):
@@ -117,7 +99,7 @@ def compute_transition_and_failure_count(failure, build, recent_builds):
     break
 
   if builds_missing_steps:
-    log.warn("builds %s missing %s" % (re_range(builds_missing_steps), step_name))
+    log.warn("builds %s missing %s" % (string_helpers.re_range(builds_missing_steps), step_name))
 
   return last_pass, first_fail, fail_count
 

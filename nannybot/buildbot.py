@@ -9,6 +9,7 @@ import operator
 import os
 import requests
 import urlparse
+import string_helpers
 
 
 # Python logging is stupidly verbose to configure.
@@ -72,8 +73,8 @@ def fetch_master_json(master_url):
 
 
 def prefill_builds_cache(cache, master_url, builder_name):
-    builds_url = '%s/get_builds' % CBE_BASE
     master_name = master_name_from_url(master_url)
+    builds_url = '%s/get_builds' % CBE_BASE
     params = { 'master': master_name, 'builder': builder_name }
     response = requests.get(builds_url, params=params)
     builds = response.json()['builds']
@@ -86,7 +87,7 @@ def prefill_builds_cache(cache, master_url, builder_name):
     key = cache_key_for_build(master_url, builder_name, build_number)
     cache.set(key, build)
     build_numbers = map(operator.itemgetter('number'), builds)
-    # log.debug('Prefilled %s for %s %s' % (re_range(build_numbers), master_url, builder_name))
+    log.debug('Prefilled %s for %s %s' % (string_helpers.re_range(build_numbers), master_name, builder_name))
     return build_numbers
 
 
