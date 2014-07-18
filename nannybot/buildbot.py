@@ -83,9 +83,9 @@ def prefill_builds_cache(cache, master_url, builder_name):
             index = builds.index(build)
             log.error('build at index %s in %s missing number?' % (index, response.url))
             continue
-    build_number = build['number']
-    key = cache_key_for_build(master_url, builder_name, build_number)
-    cache.set(key, build)
+        build_number = build['number']
+        key = cache_key_for_build(master_url, builder_name, build_number)
+        cache.set(key, build)
     build_numbers = map(operator.itemgetter('number'), builds)
     log.debug('Prefilled %s for %s %s' % (string_helpers.re_range(build_numbers), master_name, builder_name))
     return build_numbers
