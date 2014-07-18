@@ -8,6 +8,9 @@ handlers:
 - url: /
   static_files: nannybot.html
   upload: nannybot.html
+- url: /closers
+  static_files: closers.html
+  upload: closers.html
 - url: /components
   static_dir: bower_components
 - url: /scripts

@@ -25,6 +25,32 @@ def excluded_builders(master_config):
     return master_config[0].get('*', {}).get('excluded_builders', set())
 
 
+# FIXME: This is currently baked into:
+# https://chromium.googlesource.com/chromium/tools/build/+/master/scripts/slave/gatekeeper_launch.py
+# http://crbug.com/394961
+MASTER_CONFIG = {
+  'chromium-status': [
+    'chromium',
+    'chromium.chrome',
+    'chromium.chromiumos',
+    'chromium.gpu',
+    'chromium.linux',
+    'chromium.mac',
+    'chromium.memory',
+    'chromium.win',
+  ],
+  'blink-status': [
+    'chromium.webkit',
+  ],
+}
+
+
+def tree_for_master(master_name):
+  for tree_name, master_names in MASTER_CONFIG.items():
+    if master_name in master_names:
+      return tree_name
+
+
 def would_close_tree(master_config, builder_name, step_name):
   # FIXME: Section support should be removed:
   master_config = master_config[0]

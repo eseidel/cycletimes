@@ -227,7 +227,9 @@ def alerts_for_master(cache, master_url, master_json):
 def apply_gatekeeper_rules(alerts, gatekeeper):
   filtered_alerts = []
   for alert in alerts:
-    config = gatekeeper.get(alert['master_url'])
+    master_url = alert['master_url']
+    master_name = buildbot.master_name_from_url(master_url)
+    config = gatekeeper.get(master_url)
     if not config:
       # Unclear if this should be set or not?
       # alert['would_close_tree'] = False
@@ -239,6 +241,7 @@ def apply_gatekeeper_rules(alerts, gatekeeper):
     alert['would_close_tree'] = \
       gatekeeper_extras.would_close_tree(config, alert['builder_name'], alert['step_name'])
     filtered_alerts.append(alert)
+    alert['tree_name'] = gatekeeper_extras.tree_for_master(master_name)
   return filtered_alerts
 
 

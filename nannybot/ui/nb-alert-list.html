@@ -31,6 +31,7 @@
         </td>
         <td>{{ record.row.last_result_time | since_string }}</td>
         <td>{{ record.row.would_close_tree }}</td>
+        <td>{{ record.row.tree_name }}</td>
       </template>
     </sortable-table>
   </template>
@@ -46,6 +47,7 @@
         { title: 'changelogs', name: 'failing_revisions' }, // also bad.
         { title: 'since', name: 'last_result_time' },
         { title: 'closer', name: 'would_close_tree' },
+        { title: 'tree', name: 'tree_name' },
       ];
       this.$.table.sortColumn = this.getQueryParameter('sortColumn');
       this.$.table.sortDescending = this.getQueryParameter('sortDescending');
