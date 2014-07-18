@@ -8,22 +8,22 @@
         </style>
         <td>{{record.row.master_url | master_name }}</td>
         <td style='max-width: 150px; overflow: hidden'>
-          <a href?='{{ record.row | builder_url }}'>{{record.row.builder_name}}</a>
+          <a href='{{ record.row | builder_url }}'>{{record.row.builder_name}}</a>
         </td>
         <td>{{record.row.failing_build_count}}</td>
         <td style='max-width: 300px; overflow: hidden; word-wrap: break-word;'>
-          <a href?='{{ record.row | stdio_url(record.row.failing_build) }}'>{{record.row.step_name}}</a>
+          <a href='{{ record.row | stdio_url(record.row.failing_build) }}'>{{record.row.step_name}}</a>
           <br>
           <template if="{{ record.row.reason }}">
-            <a href?="{{ record.row.reason | flakiness_dashboard_url(record.row.step_name) }}">
+            <a href="{{ record.row.reason | flakiness_dashboard_url(record.row.step_name) }}">
               {{record.row.reason }}
             </a>
           </template>
         </td>
         <td>
-          <a class='fail_link' href?="{{ record.row | build_url(record.row.failing_build) }}">F</a>
+          <a class='fail_link' href="{{ record.row | build_url(record.row.failing_build) }}">F</a>
           <template if='{{ record.row.passing_build }}'>
-            <a class='pass_link' href?="{{ record.row | build_url(record.row.passing_build) }}">P</a>
+            <a class='pass_link' href="{{ record.row | build_url(record.row.passing_build) }}">P</a>
           </template>
         </td>
         <td style='max-width: 200px; overflow: hidden'>

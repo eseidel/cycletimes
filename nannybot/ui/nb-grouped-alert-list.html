@@ -1,5 +1,6 @@
 <polymer-element name='nb-grouped-alert-list' attributes='failures groups'>
 <template>
+  <script src='filters.js'></script>
   <table>
   <tr><th>reason</th><th>blame</th><th>builders</th></tr>
   <template repeat="{{ group in groups }}">
@@ -10,7 +11,8 @@
           <template if="{{ reason }}">
             <!-- FIXME this will be wrong if there are multiple step names! -->
             <div>
-            <a href?="{{ reason | flakiness_dashboard_url(group.failures[0].step_name) }}">
+              {{ reason | flakiness_dashboard_url(group.failures[0].step_name) }}
+            <a href="{{ reason | flakiness_dashboard_url(group.failures[0].step_name) }}">
               {{reason }}
             </a>
             </div>
@@ -21,7 +23,7 @@
         <template if="{{ group.likely_revisions.length < 10}}">
           <template repeat="{{ revision in group.likely_revisions }}">
             <div>
-              <a href?="{{ revision | change_url }}">{{ revision }}</a>
+              <a href="{{ revision | change_url }}">{{ revision }}</a>
             </div>
           </template>
         </template>

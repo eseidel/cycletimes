@@ -1,5 +1,6 @@
 <polymer-element name="nb-ignores-list" attributes='ignores' noscript>
 <template>
+    <script src='filters.js'></script>
     <table>
     <tr><th>pattern</th><th>added</th></tr>
     <template repeat="{{ ignore in ignores }}">
