@@ -87,7 +87,10 @@ def prefill_builds_cache(cache, master_url, builder_name):
         key = cache_key_for_build(master_url, builder_name, build_number)
         cache.set(key, build)
     build_numbers = map(operator.itemgetter('number'), builds)
-    log.debug('Prefilled (%.1fs) %s for %s %s' % (response.elapsed, string_helpers.re_range(build_numbers), master_name, builder_name))
+    log.debug('Prefilled (%.1fs) %s for %s %s' %
+        (response.elapsed.total_seconds(),
+        string_helpers.re_range(build_numbers),
+        master_name, builder_name))
     return build_numbers
 
 
