@@ -11,6 +11,11 @@ import urlparse
 import argparse
 import re
 
+import requests_cache
+
+requests_cache.install_cache('reasons')
+
+
 # This is relative to build/scripts:
 # https://chromium.googlesource.com/chromium/tools/build/+/master/scripts
 BUILD_SCRIPTS_PATH = "/src/build/scripts"
@@ -174,7 +179,7 @@ class LayoutTestsSplitter(object):
 
     if not archive_step:
       log.warn('No archive step in %s' % url_to_build)
-      print json.dumps(build['steps'], indent=1)
+      # print json.dumps(build['steps'], indent=1)
       return None
 
     html_results_url = archive_step['urls'].get('layout test results')
@@ -182,11 +187,12 @@ class LayoutTestsSplitter(object):
     if not html_results_url:
       html_results_url = archive_step['urls'].get('results')
 
-    # FIXME: This can happen when the webkit_tests step has an exception
-    # unclear if we want to special case that and not log here.
     if not html_results_url:
-      log.warn('No results url for archive step in %s' % url_to_build)
-      print json.dumps(archive_step, indent=1)
+      webkit_tests_step = next((step for step in build['steps'] if step['name'] == 'webkit_tests'), None)
+      # Common cause of this is an exception in the webkit_tests step.
+      if webkit_tests_step['results'][0] != 5:
+        log.warn('No results url for archive step in %s' % url_to_build)
+      # print json.dumps(archive_step, indent=1)
       return None
 
     # !@?#!$^&$% WTF HOW DO URLS HAVE \r in them!?!
@@ -195,6 +201,10 @@ class LayoutTestsSplitter(object):
     jsonp_url = urlparse.urljoin(html_results_url, 'failing_results.json')
     # FIXME: Silly that this is still JSONP.
     jsonp_string = requests.get(jsonp_url).text
+    if "The specified key does not exist" in jsonp_string:
+      log.warn('%s missing for %s' % (jsonp_url, url_to_build))
+      return None
+
     json_string = jsonp_string[len('ADD_RESULTS('):-len(');')]
     try:
       results = json.loads(json_string)

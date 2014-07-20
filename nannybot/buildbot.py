@@ -103,7 +103,7 @@ def fetch_and_cache_build(cache, url, cache_key):
         log.debug('Not caching in-progress build from %s.')
       return build
   except ValueError, e:
-    log.error('Error %s: %s' % (url, e))
+    log.error('Not caching invalid json: %s: %s' % (url, e))
 
 
 def fetch_build_json(cache, master_url, builder_name, build_number):
