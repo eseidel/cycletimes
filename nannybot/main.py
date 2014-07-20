@@ -18,7 +18,7 @@ class AlertBlob(ndb.Model):
     date = ndb.DateTimeProperty(auto_now_add=True)
     # This could be JSONProperty, but no need to parse
     # the incoming json only to serialize it again.
-    content = ndb.BlobPropety(indexed=False)
+    content = ndb.BlobProperty(indexed=False)
 
 
 class IgnoreRule(ndb.Model):
