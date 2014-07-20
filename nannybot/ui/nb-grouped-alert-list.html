@@ -11,7 +11,7 @@
           <template if="{{ reason }}">
             <!-- FIXME this will be wrong if there are multiple step names! -->
             <div>
-            <a href="{{ reason | flakiness_dashboard_url(group.failures[0].step_name) }}">
+            <a href="{{ reason | flakiness_dashboard_url(group.failures[0].step_name, group.failures[0].master_url) }}">
               {{reason }}
             </a>
             </div>

@@ -15,7 +15,7 @@
           <a href='{{ record.row | stdio_url(record.row.failing_build) }}'>{{record.row.step_name}}</a>
           <br>
           <template if="{{ record.row.reason }}">
-            <a href="{{ record.row.reason | flakiness_dashboard_url(record.row.step_name) }}">
+            <a href="{{ record.row.reason | flakiness_dashboard_url(record.row.step_name, record.row.master_url) }}">
               {{record.row.reason }}
             </a>
           </template>
