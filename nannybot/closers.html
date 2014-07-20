@@ -1,0 +1,85 @@
+<!doctype html>
+<html>
+<head>
+  <title>Tree Closers</title>
+  <meta name="viewport" content="width=device-width, minimum-scale=1.0, initial-scale=1.0, user-scalable=yes">
+  <script src="components/platform/platform.js"></script>
+  <script src="scripts/repositories.js"></script>
+  <script src="scripts/third_party/js_humanized_time_span/humanized_time_span.js"></script>
+  <style>
+  html,body {
+    height: 100%;
+    margin: 0;
+    background-color: #E5E5E5;
+    font-family: 'RobotoDraft', sans-serif;
+  }
+  </style>
+  <link rel="import" href="components/polymer/polymer.html">
+  <script src="ui/filters.js"></script>
+  <link rel="import" href="components/core-ajax/core-ajax.html">
+  <link rel="import" href="components/font-roboto/roboto.html">
+  <link rel="import" href="components/paper-tabs/paper-tabs.html">
+  <link rel="import" href="components/sortable-table/sortable-table.html">
+  <link rel="import" href="ui/nb-changelogs.html">
+  <link rel="import" href="ui/nb-alert-list.html">
+  <link rel="import" href="ui/nb-grouped-alert-list.html">
+  <link rel="shortcut icon" href="/favicon.ico">
+</head>
+
+<body unresolved touch-action="auto">
+
+<polymer-element name="nb-main" attributes='failures filteredFailures selectedTree'>
+<template>
+Updated: {{ response.date | since_string }},
+<h1>Open Tree Closing Issues</h1>
+<style>
+  paper-tabs {
+    background-color: #00bcd4;
+    color: #fff;
+    box-shadow: 0px 3px 2px rgba(0, 0, 0, 0.2);
+  }
+</style>
+<paper-tabs valueattr="tree" selected="{{ selectedTree }}">
+  <paper-tab tree='chromium-status'>Chromium</paper-tab>
+  <paper-tab tree='blink-status'>Blink</paper-tab>
+</paper-tabs>
+<nb-alert-list failures='{{ filteredFailures }}'></nb-alert-list>
+<core-ajax url="/data" id='loader' auto handleAs="json" response="{{ response }}"></core-ajax>
+</template>
+<script>
+Polymer('nb-main', {
+  ready: function() {
+    console.log('nb-main ready');
+    window.setInterval(30 * 1000, function() {
+      console.log('refreshing');
+      this.$.loader.go();
+    });
+    this.failures = [];
+    this.selectedTree = 'chromium-status';
+  },
+  failuresForTree: function(tree) {
+    return this.failures.filter(
+      function(failure) {
+        return ((failure.tree_name == tree) && failure.would_close_tree);
+    }, this)
+  },
+  selectedTreeChanged: function() {
+    this.filteredFailures = this.failuresForTree(this.selectedTree);
+  },
+  responseChanged: function(oldValue, newValue) {
+    this.failures = newValue.alerts;
+    this.filteredFailures = this.failuresForTree(this.selectedTree);
+  },
+});
+</script>
+</polymer-element>
+<nb-main></nb-main>
+
+<form action='/ignore' method='post'>
+<core-field>
+  <label>Pattern:</label><input name='pattern'>
+</core-field>
+<input type='submit'>
+</form>
+</body>
+</html>
