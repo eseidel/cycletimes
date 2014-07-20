@@ -16,9 +16,7 @@ class DateTimeEncoder(json.JSONEncoder):
 
 class AlertBlob(ndb.Model):
     date = ndb.DateTimeProperty(auto_now_add=True)
-    # This could be JSONProperty, but no need to parse
-    # the incoming json only to serialize it again.
-    content = ndb.BlobProperty(indexed=False)
+    content = ndb.JsonProperty(indexed=False)
 
 
 class IgnoreRule(ndb.Model):
@@ -67,7 +65,7 @@ class DataHandler(webapp2.RequestHandler):
         entries = query.fetch(1)
         response_json = {}
         if entries:
-            response_json = json.loads(entries[0].content)
+            response_json = entries[0].content
             ignores = IgnoreRule.query().fetch()
 
             def add_ignores(alert):
@@ -87,7 +85,7 @@ class DataHandler(webapp2.RequestHandler):
 
     def post(self):
         alert = AlertBlob()
-        alert.content = self.request.get('content')
+        alert.content = json.loads(self.request.get('content'))
         alert.put()
 
 
