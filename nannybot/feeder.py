@@ -52,17 +52,15 @@ CONFIG_PATH = os.path.join(BUILD_SCRIPTS_PATH, 'slave', 'gatekeeper.json')
 NON_FAILING_RESULTS = (0, 1, None)
 
 
-def compute_transition_and_failure_count(failure, build, recent_builds):
-  '''Returns last_pass_build, first_fail_build, fail_count'''
-
+def compute_transition_and_failure_count(failure, failing_build, previous_builds):
   step_name = failure['step_name']
   reason = failure['reason']
 
-  first_fail = recent_builds[0]
+  first_fail = failing_build
   last_pass = None
   fail_count = 1
   builds_missing_steps = []
-  for build in recent_builds[1:]:
+  for build in previous_builds:
     matching_steps = [s for s in build['steps'] if s['name'] == step_name]
     if len(matching_steps) != 1:
       if not matching_steps:
@@ -104,6 +102,24 @@ def compute_transition_and_failure_count(failure, build, recent_builds):
   return last_pass, first_fail, fail_count
 
 
+def complete_steps_by_type(build):
+  # Some builders use a sub-step pattern which just generates noise.
+  # FIXME: This code shouldn't contain constants like these.
+  IGNORED_STEP_NAMES = ['steps', 'trigger', 'slave_steps']
+  steps = build['steps']
+  complete_steps = [s for s in steps if s['isFinished']]
+
+  ignored = [s for s in complete_steps if s['name'] in IGNORED_STEP_NAMES]
+  not_ignored = [s for s in complete_steps if s['name'] not in IGNORED_STEP_NAMES]
+
+  # 'passing' and 'failing' are slightly inaccurate
+  # 'not_failing' and 'not_passing' would be more accurate, but harder to read.
+  passing = [s for s in not_ignored if s['results'][0] in NON_FAILING_RESULTS]
+  failing = [s for s in not_ignored if s['results'][0] not in NON_FAILING_RESULTS]
+
+  return passing, failing, ignored
+
+
 def failing_steps_for_build(build):
   if build.get('results') is None:
     log.error('Bad build: %s %s %s' % (build.get('number'), build.get('eta'), build.get('currentStep', {}).get('name')))
@@ -126,72 +142,113 @@ def reasons_for_failure(step, build, builder_name, master_url):
     return splitter.split_step(step, build, builder_name, master_url)
 
 
-def failures_for_build(build, master_url, builder_name):
-  failures = []
-  for step in failing_steps_for_build(build):
-    step_template = {
-      'master_url': master_url,
-      'last_result_time': step['times'][1],
-      'builder_name': builder_name,
-      'step_name': step['name'],
-      'latest_revisions': buildbot.revisions_from_build(build),
-    }
-    reasons = reasons_for_failure(step, build, builder_name, master_url)
-    if not reasons:
-      failure = dict(step_template)
-      failure['reason'] = None
-      failures.append(failure)
-    else:
-      for reason in reasons:
-        failure = dict(step_template)
-        failure['reason'] = reason
-        failures.append(failure)
+def alerts_from_step_failure(cache, step_failure, master_url, builder_name):
+  build = buildbot.fetch_build_json(cache, master_url, builder_name, step_failure['build_number'])
+  step = next((s for s in build['steps'] if s['name'] == step_failure['step_name']), None)
+  step_template = {
+    'master_url': master_url,
+    'last_result_time': step['times'][1],
+    'builder_name': builder_name,
+    'last_failing_build': step_failure['build_number'],
+    'step_name': step['name'],
+    'latest_revisions': buildbot.revisions_from_build(build),
+  }
+  alerts = []
+  reasons = reasons_for_failure(step, build, builder_name, master_url)
+  if not reasons:
+    alert = dict(step_template)
+    alert['reason'] = None
+    alerts.append(alert)
+  else:
+    for reason in reasons:
+      alert = dict(step_template)
+      alert['reason'] = reason
+      alerts.append(alert)
 
-  return failures
+  return alerts
 
 
 # FIXME: This should merge with compute_transition_and_failure_count.
-def fill_in_transition(failure, build, recent_builds):
+def fill_in_transition(cache, alert, recent_build_ids):
+  previous_build_ids = [num for num in recent_build_ids if num < alert['last_failing_build']]
+  fetch_function = lambda num: buildbot.fetch_build_json(cache, alert['master_url'], alert['builder_name'], num)
+  build = fetch_function(alert['last_failing_build'])
+  previous_builds = map(fetch_function, previous_build_ids)
+
   last_pass_build, first_fail_build, fail_count = \
-    compute_transition_and_failure_count(failure, build, recent_builds)
+    compute_transition_and_failure_count(alert, build, previous_builds)
 
   failing = buildbot.revisions_from_build(first_fail_build)
   passing = buildbot.revisions_from_build(last_pass_build) if last_pass_build else None
 
-  failure.update({
+  alert.update({
     'failing_build_count': fail_count,
     'passing_build': last_pass_build['number'] if last_pass_build else None,
     'failing_build': first_fail_build['number'],
     'failing_revisions': failing,
     'passing_revisions': passing,
   })
-  return failure
+  return alert
 
 
-def alerts_for_builder(cache, master_url, builder_name, recent_build_ids, active_builds):
-  recent_build_ids = sorted(recent_build_ids, reverse=True)
+def find_current_step_failures(fetch_function, recent_build_ids):
+  step_failures = []
+  success_step_names = set()
+  for build_id in recent_build_ids:
+    build = fetch_function(build_id)
+    passing, failing, _ = complete_steps_by_type(build)
+    passing_names = set(map(lambda s: s['name'], passing))
+    success_step_names.update(passing_names)
+    for step in failing:
+      if step['name'] in success_step_names:
+        log.debug('%s passing in a more recent build, ignoring.' % (step['name']))
+        continue
+      print success_step_names
+      step_failures.append({
+        'build_number': build_id,
+        'step_name': step['name'],
+      })
+    # Bad way to check is-finished.
+    if build['eta'] is None:
+      break
+    log.debug('build %s incomplete, continuing search' % build['number'])
+  return step_failures
 
+
+# for each build:
+# Walk all its completed steps
+# if step in success_steps, continue.
+# if step passed, add to success_steps
+# if step failed, understand it.
+# add failures to failures set.
+# if build is finished, break.
+
+
+def warm_build_cache(cache, master_url, builder_name, recent_build_ids, active_builds):
+  actives = filter(lambda build: build['builderName'] == builder_name, active_builds)
   active_build_ids = [b['number'] for b in active_builds]
   # recent_build_ids includes active ones.
-  recent_build_ids = [b for b in recent_build_ids if b not in active_build_ids]
-
-  cache_key = buildbot.cache_key_for_build(master_url, builder_name, recent_build_ids[0])
+  finished_build_ids = [b for b in recent_build_ids if b not in active_build_ids]
+  cache_key = buildbot.cache_key_for_build(master_url, builder_name, max(finished_build_ids))
   if not cache.get(cache_key):
     buildbot.prefill_builds_cache(cache, master_url, builder_name)
 
-  # Limit to 100 for now to match the prefill.
+
+def alerts_for_builder(cache, master_url, builder_name, recent_build_ids):
+  recent_build_ids = sorted(recent_build_ids, reverse=True)
+  # Limit to 100 to match our current cache-warming logic
   recent_build_ids = recent_build_ids[:100]
 
-  recent_builds = [buildbot.fetch_build_json(cache, master_url, builder_name, num) for num in recent_build_ids]
-  # Some fetches may fail.
-  recent_builds = filter(None, recent_builds)
-  if not recent_builds:
-    log.warn("No recent builds for %s, skipping." % builder_name)
-    return []
+  fetch_function = lambda num: buildbot.fetch_build_json(cache, master_url, builder_name, num)
+  step_failures = find_current_step_failures(fetch_function, recent_build_ids)
 
-  build = recent_builds[0]
-  failures = failures_for_build(build, master_url, builder_name)
-  return [fill_in_transition(failure, build, recent_builds) for failure in failures]
+  for failure in step_failures:
+    print '%s from %s' % (failure['step_name'], failure['build_number'])
+
+  alerts = []
+  for step_failure in step_failures:
+    alerts += alerts_from_step_failure(cache, step_failure, master_url, builder_name)
+  return [fill_in_transition(cache, alert, recent_build_ids) for alert in alerts]
 
 
 def alerts_for_master(cache, master_url, master_json):
@@ -202,12 +259,13 @@ def alerts_for_master(cache, master_url, master_json):
 
   alerts = []
   for builder_name, builder_json in master_json['builders'].items():
-    actives = filter(lambda build: build['builderName'] == builder_name, active_builds)
     # cachedBuilds will include runningBuilds.
     recent_build_ids = builder_json['cachedBuilds']
     master_name = buildbot.master_name_from_url(master_url)
     log.debug("%s %s" % (master_name, builder_name))
-    alerts.extend(alerts_for_builder(cache, master_url, builder_name, recent_build_ids, actives))
+
+    warm_build_cache(cache, master_url, builder_name, recent_build_ids, active_builds)
+    alerts.extend(alerts_for_builder(cache, master_url, builder_name, recent_build_ids))
 
   return alerts
 
