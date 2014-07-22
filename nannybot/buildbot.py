@@ -103,7 +103,7 @@ def fetch_and_cache_build(cache, url, cache_key):
       if build.get('eta') is None:
         cache.set(cache_key, build)
       else:
-        log.debug('Not caching in-progress build from %s.')
+        log.debug('Not caching in-progress build from %s.' % url)
       return build
   except ValueError, e:
     log.error('Not caching invalid json: %s: %s' % (url, e))
