@@ -86,6 +86,11 @@ def merge_regression_ranges(alerts):
     failing_dicts = map(operator.itemgetter('failing_revisions'), alerts)
     first_failing = reduce(_make_merge_dicts(older_commit), failing_dicts)
 
+    # FIXME: Ojan would like us to remove keys from both last and first
+    # in the case where last > first.  Unfortunately that's somewhat
+    # tricky to do here.  It happens that flatten_to_commit_list
+    # happens to do this for us since range(5, 3) == [] in python.
+
     return last_passing, first_failing
 
 
