@@ -56,6 +56,9 @@ def main(args):
   trees_encoded = requests.get(trees_url).text
   trees = json.loads(base64.b64decode(trees_encoded))
 
+  # FIXME: This analysis is wrong for builder/tester pairs
+  # since it's averaging their cycle time instead of summing.
+
   for tree_name, tree_config in trees.items():
     stats_by_master = {}
     for master_url in tree_config['masters']:
