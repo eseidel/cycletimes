@@ -10,6 +10,7 @@ import os
 import requests
 import urlparse
 import string_helpers
+import datetime
 
 
 # Python logging is stupidly verbose to configure.
@@ -38,6 +39,10 @@ class BuildCache(object):
     def has(self, key):
         path = os.path.join(self.root_path, key)
         return os.path.exists(path)
+
+    def key_age(self, key):
+        path = os.path.join(self.root_path, key)
+        return datetime.datetime.fromtimestamp(os.path.getmtime(path))
 
     # Could be attr getter.
     def get(self, key):
@@ -98,7 +103,8 @@ def fetch_and_cache_build(cache, url, cache_key):
   log.debug('Fetching %s.' % url)
   response = requests.get(url)
   if response.status_code != 200:
-    log.error('Fetch fail (%s): %s' % (response.status_code, response.url))
+    log.error('Fetch (%.1fs) fail (%s): %s' % (response.elapsed.total_seconds(),
+        response.status_code, response.url))
     return None
 
   try:
@@ -107,27 +113,28 @@ def fetch_and_cache_build(cache, url, cache_key):
     log.error('Not caching invalid json: %s (%s): %s\n%s' % (url, response.status_code, e, response.text))
     return None
 
-  if build.get('eta') is None:
-    cache.set(cache_key, build)
-  else:
-    log.debug('Not caching in-progress build from %s.' % url)
-
+  cache.set(cache_key, build)
   return build
 
 
 def fetch_build_json(cache, master_url, builder_name, build_number):
   cache_key = cache_key_for_build(master_url, builder_name, build_number)
   build = cache.get(cache_key)
-  # I accidentally stored some error builds and incomplete builds before.
-  if build and (not build.get('number') or build.get('eta')):
-    log.warn('Refetching %s %s %s' % (master_url, builder_name, build_number))
+  # We will cache in-progress builds, but only for 2 minutes.
+  if build and build.get('eta'):
+    cache_age = datetime.datetime.now() - cache.key_age(cache_key)
+    # Round for display.
+    cache_age = datetime.timedelta(seconds=round(cache_age.total_seconds()))
+    if cache_age.total_seconds() < 120:
+      return build
+    log.debug('Refetching (%s) %s %s %s' % (cache_age, master_url, builder_name, build_number))
     build = None
 
   master_name = master_name_from_url(master_url)
 
-  cbe_url = "https://chrome-build-extract.appspot.com/p/%s/builders/%s/builds/%s?json=1" % (
-    master_name, builder_name, build_number)
   if not build:
+    cbe_url = "https://chrome-build-extract.appspot.com/p/%s/builders/%s/builds/%s?json=1" % (
+      master_name, builder_name, build_number)
     build = fetch_and_cache_build(cache, cbe_url, cache_key)
 
   if not build:
