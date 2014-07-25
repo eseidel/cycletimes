@@ -203,7 +203,6 @@ def find_current_step_failures(fetch_function, recent_build_ids):
       if step['name'] in success_step_names:
         log.debug('%s passing in a more recent build, ignoring.' % (step['name']))
         continue
-      print success_step_names
       step_failures.append({
         'build_number': build_id,
         'step_name': step['name'],
@@ -211,7 +210,7 @@ def find_current_step_failures(fetch_function, recent_build_ids):
     # Bad way to check is-finished.
     if build['eta'] is None:
       break
-    log.debug('build %s incomplete, continuing search' % build['number'])
+    # log.debug('build %s incomplete, continuing search' % build['number'])
   return step_failures
 
 
@@ -230,6 +229,7 @@ def warm_build_cache(cache, master_url, builder_name, recent_build_ids, active_b
   # recent_build_ids includes active ones.
   finished_build_ids = [b for b in recent_build_ids if b not in active_build_ids]
   cache_key = buildbot.cache_key_for_build(master_url, builder_name, max(finished_build_ids))
+  # FIXME: This doesn't understand that we will cache in-progress builds.
   if not cache.get(cache_key):
     buildbot.prefill_builds_cache(cache, master_url, builder_name)
 
@@ -242,8 +242,8 @@ def alerts_for_builder(cache, master_url, builder_name, recent_build_ids):
   fetch_function = lambda num: buildbot.fetch_build_json(cache, master_url, builder_name, num)
   step_failures = find_current_step_failures(fetch_function, recent_build_ids)
 
-  for failure in step_failures:
-    print '%s from %s' % (failure['step_name'], failure['build_number'])
+  # for failure in step_failures:
+  #   print '%s from %s' % (failure['step_name'], failure['build_number'])
 
   alerts = []
   for step_failure in step_failures:
