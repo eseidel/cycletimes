@@ -202,7 +202,7 @@ class LayoutTestsSplitter(object):
     # FIXME: Silly that this is still JSONP.
     jsonp_string = requests.get(jsonp_url).text
     if "The specified key does not exist" in jsonp_string:
-      log.warn('%s missing for %s' % (jsonp_url, url_to_build))
+      log.warn('%s %s %s missing failing_results.json' % (builder_name, build['number'], step['name']))
       return None
 
     json_string = jsonp_string[len('ADD_RESULTS('):-len(');')]
