@@ -10,6 +10,7 @@ import urllib
 import urlparse
 import argparse
 import re
+import buildbot
 
 import requests_cache
 
@@ -56,6 +57,11 @@ def stdio_for_step(master_url, builder_name, build, step):
     return None
 
 
+def fancy_case_master_name(master_url):
+  master_name = buildbot.master_name_from_url(master_url)
+  return master_name.title().replace('.', '')
+
+
 # These are reason finders, more than splitters?
 class GTestSplitter(object):
   def handles_step(self, step):
@@ -71,6 +77,22 @@ class GTestSplitter(object):
     return step_name in KNOWN_STEPS
 
   def split_step(self, step, build, builder_name, master_url):
+    params = {
+      'name': 'full_results.json',
+      'master': fancy_case_master_name(master_url),
+      'builder': builder_name,
+      'buildnumber': build['number'],
+      'testtype': step['name'],
+    }
+    base_url = 'http://test-results.appspot.com/testfile'
+    response = requests.get(base_url, params=params)
+    if response.status_code == 200:
+      test_results = response.json()['tests']
+      failing_tests = [name for name, results in test_results.items() if results['expected'] != results['actual']]
+      if failing_tests:
+        return failing_tests
+
+    log.warn('test-results missing %s %s %s, using GTestLogParser.' % (builder_name, build['number'], step['name']))
     stdio_log = stdio_for_step(master_url, builder_name, build, step)
     # Can't split if we can't get the logs.
     if not stdio_log:
