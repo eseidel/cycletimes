@@ -100,10 +100,9 @@ def prefill_builds_cache(cache, master_url, builder_name):
 
 
 def fetch_and_cache_build(cache, url, cache_key):
-  log.debug('Fetching %s.' % url)
   response = requests.get(url)
   if response.status_code != 200:
-    log.error('Fetch (%.1fs) fail (%s): %s' % (response.elapsed.total_seconds(),
+    log.error('Failed (%.1fs, %s) %s' % (response.elapsed.total_seconds(),
         response.status_code, response.url))
     return None
 
@@ -113,6 +112,7 @@ def fetch_and_cache_build(cache, url, cache_key):
     log.error('Not caching invalid json: %s (%s): %s\n%s' % (url, response.status_code, e, response.text))
     return None
 
+  log.debug('Fetched (%.1fs) %s' % (response.elapsed.total_seconds(), url))
   cache.set(cache_key, build)
   return build
 
@@ -120,6 +120,8 @@ def fetch_and_cache_build(cache, url, cache_key):
 def fetch_build_json(cache, master_url, builder_name, build_number):
   cache_key = cache_key_for_build(master_url, builder_name, build_number)
   build = cache.get(cache_key)
+  master_name = master_name_from_url(master_url)
+
   # We will cache in-progress builds, but only for 2 minutes.
   if build and build.get('eta'):
     cache_age = datetime.datetime.now() - cache.key_age(cache_key)
@@ -127,10 +129,8 @@ def fetch_build_json(cache, master_url, builder_name, build_number):
     cache_age = datetime.timedelta(seconds=round(cache_age.total_seconds()))
     if cache_age.total_seconds() < 120:
       return build
-    log.debug('Refetching (%s) %s %s %s' % (cache_age, master_url, builder_name, build_number))
+    log.debug('Expired (%s) %s %s %s' % (cache_age, master_name, builder_name, build_number))
     build = None
-
-  master_name = master_name_from_url(master_url)
 
   if not build:
     cbe_url = "https://chrome-build-extract.appspot.com/p/%s/builders/%s/builds/%s?json=1" % (
