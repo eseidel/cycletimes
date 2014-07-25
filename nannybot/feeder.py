@@ -97,7 +97,7 @@ def compute_transition_and_failure_count(failure, failing_build, previous_builds
     break
 
   if builds_missing_steps:
-    log.warn("builds %s missing %s" % (string_helpers.re_range(builds_missing_steps), step_name))
+    log.warn("Builds %s missing %s step" % (string_helpers.re_range(builds_missing_steps), step_name))
 
   return last_pass, first_fail, fail_count
 
@@ -224,13 +224,23 @@ def find_current_step_failures(fetch_function, recent_build_ids):
 
 
 def warm_build_cache(cache, master_url, builder_name, recent_build_ids, active_builds):
+  # Cache active (in-progress) builds:
   actives = filter(lambda build: build['builderName'] == builder_name, active_builds)
+  for build in actives:
+    key = buildbot.cache_key_for_build(master_url, builder_name, build['number'])
+    cache.set(key, build)
+
   active_build_ids = [b['number'] for b in active_builds]
   # recent_build_ids includes active ones.
   finished_build_ids = [b for b in recent_build_ids if b not in active_build_ids]
   cache_key = buildbot.cache_key_for_build(master_url, builder_name, max(finished_build_ids))
-  # FIXME: This doesn't understand that we will cache in-progress builds.
-  if not cache.get(cache_key):
+
+  # We cache in-progress builds, so if the first finished build has a non-None
+  # eta, then it's just the cached version from when it was in progress.
+  cached_build = cache.get(cache_key)
+  if not cached_build or cached_build.get('eta') is not None:
+    # reason = 'in progress' if cached_build else 'missing'
+    # log.debug('prefill reason: %s %s' % (max(finished_build_ids), reason))
     buildbot.prefill_builds_cache(cache, master_url, builder_name)
 
 
