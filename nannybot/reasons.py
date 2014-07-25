@@ -88,9 +88,7 @@ class GTestSplitter(object):
     response = requests.get(base_url, params=params)
     if response.status_code == 200:
       test_results = response.json()['tests']
-      failing_tests = [name for name, results in test_results.items() if results['expected'] != results['actual']]
-      if failing_tests:
-        return failing_tests
+      return [name for name, results in test_results.items() if results['expected'] != results['actual']]
 
     log.warn('test-results missing %s %s %s, using GTestLogParser.' % (builder_name, build['number'], step['name']))
     stdio_log = stdio_for_step(master_url, builder_name, build, step)
