@@ -262,7 +262,6 @@ def alerts_for_master(cache, master_url, master_json):
     # cachedBuilds will include runningBuilds.
     recent_build_ids = builder_json['cachedBuilds']
     master_name = buildbot.master_name_from_url(master_url)
-    log.debug("%s %s" % (master_name, builder_name))
 
     warm_build_cache(cache, master_url, builder_name, recent_build_ids, active_builds)
     alerts.extend(alerts_for_builder(cache, master_url, builder_name, recent_build_ids))
