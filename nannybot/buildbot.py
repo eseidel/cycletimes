@@ -96,17 +96,23 @@ def prefill_builds_cache(cache, master_url, builder_name):
 
 def fetch_and_cache_build(cache, url, cache_key):
   log.debug('Fetching %s.' % url)
+  response = requests.get(url)
+  if response.status_code != 200:
+    log.error('Fetch fail (%s): %s' % (response.status_code, response.url))
+    return None
+
   try:
-    build = requests.get(url).json()
-    # Don't cache builds which are just errors?
-    if build.get('number'):
-      if build.get('eta') is None:
-        cache.set(cache_key, build)
-      else:
-        log.debug('Not caching in-progress build from %s.' % url)
-      return build
+    build = response.json()
   except ValueError, e:
-    log.error('Not caching invalid json: %s: %s' % (url, e))
+    log.error('Not caching invalid json: %s (%s): %s\n%s' % (url, response.status_code, e, response.text))
+    return None
+
+  if build.get('eta') is None:
+    cache.set(cache_key, build)
+  else:
+    log.debug('Not caching in-progress build from %s.' % url)
+
+  return build
 
 
 def fetch_build_json(cache, master_url, builder_name, build_number):
@@ -125,7 +131,6 @@ def fetch_build_json(cache, master_url, builder_name, build_number):
     build = fetch_and_cache_build(cache, cbe_url, cache_key)
 
   if not build:
-    log.warn("CBE failed, failover to buildbot %s" % cbe_url)
     buildbot_url = "https://build.chromium.org/p/%s/json/builders/%s/builds/%s" % (
       master_name, builder_name, build_number)
     build = fetch_and_cache_build(cache, buildbot_url, cache_key)
