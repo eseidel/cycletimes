@@ -16,7 +16,7 @@ class DateTimeEncoder(json.JSONEncoder):
 
 class AlertBlob(ndb.Model):
     date = ndb.DateTimeProperty(auto_now_add=True)
-    content = ndb.JsonProperty(indexed=False)
+    content = ndb.JsonProperty(indexed=False, compressed=True)
 
 
 class IgnoreRule(ndb.Model):
