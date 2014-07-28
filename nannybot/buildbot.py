@@ -188,3 +188,24 @@ def latest_revisions_for_master(cache, master_url, master_json):
     last_build = fetch_build_json(cache, master_url, builder_name, last_finished_id)
     latest_revisions[master_name][builder_name] = revisions_from_build(last_build)
   return latest_revisions
+
+
+def warm_build_cache(cache, master_url, builder_name, recent_build_ids, active_builds):
+  # Cache active (in-progress) builds:
+  actives = filter(lambda build: build['builderName'] == builder_name, active_builds)
+  for build in actives:
+    key = cache_key_for_build(master_url, builder_name, build['number'])
+    cache.set(key, build)
+
+  active_build_ids = [b['number'] for b in active_builds]
+  # recent_build_ids includes active ones.
+  finished_build_ids = [b for b in recent_build_ids if b not in active_build_ids]
+  cache_key = cache_key_for_build(master_url, builder_name, max(finished_build_ids))
+
+  # We cache in-progress builds, so if the first finished build has a non-None
+  # eta, then it's just the cached version from when it was in progress.
+  cached_build = cache.get(cache_key)
+  if not cached_build or cached_build.get('eta') is not None:
+    # reason = 'in progress' if cached_build else 'missing'
+    # log.debug('prefill reason: %s %s' % (max(finished_build_ids), reason))
+    prefill_builds_cache(cache, master_url, builder_name)
