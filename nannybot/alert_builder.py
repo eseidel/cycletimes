@@ -1,6 +1,12 @@
 import buildbot
 import reasons
 import logging
+import sys
+import argparse
+import re
+import json
+import urllib
+
 
 # Python logging is stupidly verbose to configure.
 def setup_logging():
@@ -199,7 +205,7 @@ def alerts_for_builder(cache, master_url, builder_name, recent_build_ids):
   return [fill_in_transition(cache, alert, recent_build_ids) for alert in alerts]
 
 
-def alerts_for_master(cache, master_url, master_json):
+def alerts_for_master(cache, master_url, master_json, builder_name_filter=None):
   active_builds = []
   for slave in master_json['slaves'].values():
     for build in slave['runningBuilds']:
@@ -207,6 +213,8 @@ def alerts_for_master(cache, master_url, master_json):
 
   alerts = []
   for builder_name, builder_json in master_json['builders'].items():
+    if builder_name_filter and builder_name_filter not in builder_name:
+        continue
     # cachedBuilds will include runningBuilds.
     recent_build_ids = builder_json['cachedBuilds']
     master_name = buildbot.master_name_from_url(master_url)
@@ -215,3 +223,28 @@ def alerts_for_master(cache, master_url, master_json):
     alerts.extend(alerts_for_builder(cache, master_url, builder_name, recent_build_ids))
 
   return alerts
+
+
+def main(args):
+    parser = argparse.ArgumentParser()
+    parser.add_argument('builder_url', action='store')
+    args = parser.parse_args(args)
+
+    # https://build.chromium.org/p/chromium.win/builders/XP%20Tests%20(1)
+    url_regexp = re.compile('(?P<master_url>.*)/builders/(?P<builder_name>.*)/?')
+    match = url_regexp.match(args.builder_url)
+
+    # FIXME: HACK
+    CACHE_PATH = '/src/build_cache'
+    cache = buildbot.BuildCache(CACHE_PATH)
+
+    master_url = match.group('master_url')
+    builder_name = urllib.unquote_plus(match.group('builder_name'))
+    master_json = buildbot.fetch_master_json(master_url)
+    # This is kinda a hack, but uses more of our existing code this way:
+    alerts = alerts_for_master(cache, master_url, master_json, builder_name)
+    print json.dumps(alerts, indent=1)
+
+
+if __name__ == '__main__':
+  sys.exit(main(sys.argv[1:]))
