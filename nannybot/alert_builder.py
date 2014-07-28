@@ -6,6 +6,7 @@ import argparse
 import re
 import json
 import urllib
+import string_helpers
 
 
 # Python logging is stupidly verbose to configure.
