@@ -58,6 +58,37 @@ def recipes_command(args):
     recipe_stats_line(builder_stats, 'TOTAL')
 
 
+def slaves_command(args):
+    with open('builder_stats.json') as stats_file:
+        builder_stats = json.load(stats_file)
+
+    all_slaves = set()
+    slaves_by_master = collections.defaultdict(set)
+    for master_name, builder_name, _, slaves in builder_stats:
+        slaves_by_master[master_name].update(slaves)
+        all_slaves.update(slaves)
+
+    slave_counts = collections.Counter()
+    for master_name, slaves in slaves_by_master.items():
+        slave_counts[master_name] = len(slaves)
+
+    print 'Popular Masters:'
+    for master_name, count in slave_counts.most_common(10):
+        print master_name, count
+
+
+    builder_counts = collections.Counter(dict([('%s:%s' % (master, builder), len(set(slaves))) for master, builder, _, slaves in builder_stats]))
+
+    print
+    print 'Popular Builders:'
+    for builder_name, count in builder_counts.most_common(10):
+        print builder_name, count
+
+    print
+    print '%s Total Slaves' % (len(all_slaves))
+
+
+
 def main(args):
     parser = argparse.ArgumentParser()
     subparsers = parser.add_subparsers()
@@ -67,6 +98,9 @@ def main(args):
 
     update_parser = subparsers.add_parser('recipes')
     update_parser.set_defaults(func=recipes_command)
+
+    update_parser = subparsers.add_parser('slaves')
+    update_parser.set_defaults(func=slaves_command)
 
     args = parser.parse_args(args)
     return args.func(args)
