@@ -23,8 +23,12 @@ def setup_logging():
 
 log, logging_handler = setup_logging()
 
+
+# Buildbot status enum.
+SUCCESS, WARNINGS, FAILURE, SKIPPED, EXCEPTION, RETRY = range(6)
+
 # Success or Warnings or None (didn't run) don't count as 'failing'.
-NON_FAILING_RESULTS = (0, 1, None)
+NON_FAILING_RESULTS = (SUCCESS, WARNINGS, SKIPPED, None)
 
 
 def compute_transition_and_failure_count(failure, failing_build, previous_builds):
@@ -228,23 +232,47 @@ def alerts_for_master(cache, master_url, master_json, builder_name_filter=None):
 
 def main(args):
     parser = argparse.ArgumentParser()
-    parser.add_argument('builder_url', action='store')
+    parser.add_argument('url', action='store')
     args = parser.parse_args(args)
 
-    # https://build.chromium.org/p/chromium.win/builders/XP%20Tests%20(1)
-    url_regexp = re.compile('(?P<master_url>.*)/builders/(?P<builder_name>.*)/?')
-    match = url_regexp.match(args.builder_url)
+    if 'builds' in args.url:
+      # http://build.chromium.org/p/tryserver.chromium/builders/win_rel/builds/298183
+      url_regexp = re.compile('(?P<master_url>.*)/builders/(?P<builder_name>.*)/builds/(?P<build_number>\d+)/?')
+    elif 'builders' in args.url:
+      # https://build.chromium.org/p/chromium.win/builders/XP%20Tests%20(1)
+      url_regexp = re.compile('(?P<master_url>.*)/builders/(?P<builder_name>.*)/?')
+    else:
+      print 'Failed to parse: %s' % args.url
+      return 1
+
+    match = url_regexp.match(args.url)
+    if not match:
+      log.error('Failed to match: %s' % args.url)
+      return 1
+
+    master_url = match.group('master_url')
+    builder_name = urllib.unquote_plus(match.group('builder_name'))
+    build_number = match.group('build_number')
 
     # FIXME: HACK
     CACHE_PATH = '/src/build_cache'
     cache = buildbot.BuildCache(CACHE_PATH)
 
-    master_url = match.group('master_url')
-    builder_name = urllib.unquote_plus(match.group('builder_name'))
-    master_json = buildbot.fetch_master_json(master_url)
-    # This is kinda a hack, but uses more of our existing code this way:
-    alerts = alerts_for_master(cache, master_url, master_json, builder_name)
-    print json.dumps(alerts, indent=1)
+    if build_number:
+      # Grab the build
+      build = buildbot.fetch_build_json(cache, master_url, builder_name, build_number)
+      if not build:
+        log.error('Failed to fetch %s' % args.url)
+        return 1
+      # get the failing steps
+      _, failing, _ = complete_steps_by_type(build)
+      # explain them?
+      print args.url, [s['name'] for s in failing]
+    else:
+      master_json = buildbot.fetch_master_json(master_url)
+      # This is kinda a hack, but uses more of our existing code this way:
+      alerts = alerts_for_master(cache, master_url, master_json, builder_name)
+      print json.dumps(alerts, indent=1)
 
 
 if __name__ == '__main__':
