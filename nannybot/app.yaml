@@ -11,6 +11,12 @@ handlers:
 - url: /closers
   static_files: closers.html
   upload: closers.html
+- url: /flakes
+  static_files: flakes.html
+  upload: flakes.html
+- url: /flake_data
+  static_files: flakes.json
+  upload: flakes.json
 - url: /components
   static_dir: bower_components
 - url: /scripts

@@ -8,6 +8,8 @@ import urllib
 
 import requests_cache
 import collections
+import logging
+import json
 
 requests_cache.install_cache('explain')
 
@@ -16,58 +18,72 @@ URL_RE = re.compile('(?P<master_url>.*)/builders/(?P<builder_name>.*)/builds/(?P
 BUILDSTATUS_RE = re.compile('(?P<master_url>.*)/buildstatus\?builder=(?P<builder_name>.*)&number=(?P<build_number>\d+)')
 
 
+def jobs_from_urls(urls):
+  jobs = []
+  for url in urls:
+    match = URL_RE.match(url)
+    if not match:
+      match = BUILDSTATUS_RE.match(url)
+    if not match:
+      logging.error('MATCH ERROR: %s' % (url))
+      continue
+
+    jobs.append({
+      'master_url': match.group('master_url'),
+      'builder_name': urllib.unquote_plus(match.group('builder_name')),
+      'build_number': match.group('build_number'),
+    })
+  return jobs
+
+
 def main(args):
-    parser = argparse.ArgumentParser()
-    parser.add_argument('urls_path', action='store')
-    args = parser.parse_args(args)
+  parser = argparse.ArgumentParser()
+  parser.add_argument('urls_path', action='store')
+  args = parser.parse_args(args)
 
-    with open(args.urls_path) as url_file:
-      urls = map(str.strip, url_file.readlines())
+  # FIXME: HACK
+  CACHE_PATH = '/src/build_cache'
+  cache = buildbot.BuildCache(CACHE_PATH)
 
-    # FIXME: HACK
-    CACHE_PATH = '/src/build_cache'
-    cache = buildbot.BuildCache(CACHE_PATH)
+  with open(args.urls_path) as url_file:
+    jobs = jobs_from_urls(map(str.strip, url_file.readlines()))
 
-    counts = collections.Counter()
+  alerts = []
+  for job in jobs:
+    build = buildbot.fetch_build_json(cache, **job)
+    if not build:
+      continue
 
-    for url in urls:
-      match = URL_RE.match(url)
-      if not match:
-        match = BUILDSTATUS_RE.match(url)
-      if not match:
-        print url, 'URL REGEXP MATCH ERROR'
-        counts.update(['URL REGEXP MATCH ERROR'])
-        continue
+    _, failing, _ = alert_builder.complete_steps_by_type(build)
 
-      master_url = match.group('master_url')
-      builder_name = urllib.unquote_plus(match.group('builder_name'))
-      build_number = match.group('build_number')
+    if not failing:
+      first_step = build['steps'][0]['results'] if build['steps'] else None
+      print '%s NO FAILING STEPS? (first result: %s)' % (job, first_step)
+      continue
 
-      # Grab the build
-      build = buildbot.fetch_build_json(cache, master_url, builder_name, build_number)
-      if not build:
-        print url, 'BUILD MISSING'
-        counts.update(['BUILD MISSING'])
-        continue
+    issue_id = buildbot.property_from_build(build, 'issue')
+    patchset_id = buildbot.property_from_build(build, 'patchset')
 
-      _, failing, _ = alert_builder.complete_steps_by_type(build)
+    for step in failing:
+      alerts.append({
+        'master_url': job['master_url'],
+        'builder_name': job['builder_name'],
+        'build_number': job['build_number'],
+        'step_name': step['name'],
+        'issue_id': issue_id,
+        'patchset_id': patchset_id,
+        'start_time': int(build['times'][0]),
+        'end_time': int(build['times'][1]),
+      })
+  print json.dumps(alerts, indent=1)
 
-      if not failing:
-        first_step = build['steps'][0]['results'] if build['steps'] else None
-        message = 'NO FAILING STEPS? (first result: %s)' % (first_step)
-        print url, message
-        counts.update([message])
-        continue
+# Currently we're feeding this script with "flaky" try job urls
+# which are collected by stats.py
 
-      step_names = [s['name'] for s in failing]
-      print url, step_names
-
-      counts.update(step_names)
-
-    for key, count in counts.most_common():
-      if count < 5:
-        break
-      print key, count
+# Alternatively we could just walk all try-builders and collect all builder
+# but then we would need to collate builds based on issue_id.  This approach
+# would allow showing "common" failures across all builders however
+# before they would show up otherwise.
 
 
 if __name__ == '__main__':

@@ -151,14 +151,15 @@ def fetch_build_json(cache, master_url, builder_name, build_number):
   return build
 
 
+def property_from_build(build_json, property_name):
+  for prop_tuple in build_json['properties']:
+    if prop_tuple[0] == property_name:
+      return prop_tuple[1]
+
+
 # This effectively extracts the 'configuration' of the build
 # we could extend this beyond repo versions in the future.
 def revisions_from_build(build_json):
-  def _property_value(build_json, property_name):
-    for prop_tuple in build_json['properties']:
-      if prop_tuple[0] == property_name:
-        return prop_tuple[1]
-
   REVISION_VARIABLES = [
     ('chromium', 'got_revision'),
     ('blink', 'got_webkit_revision'),
@@ -176,9 +177,9 @@ def revisions_from_build(build_json):
     # don't have the parent_ versions, so we have to fall back
     # to got_foo_revision in those cases!
     # Don't even think about using 'revision' that's wrong too.
-    revision = _property_value(build_json, 'parent_' + buildbot_property)
+    revision = property_from_build(build_json, 'parent_' + buildbot_property)
     if not revision:
-      revision = _property_value(build_json, buildbot_property)
+      revision = property_from_build(build_json, buildbot_property)
     revisions[repo_name] = revision
   return revisions
 

@@ -1,0 +1,101 @@
+<!doctype html>
+<html>
+<head>
+  <title>Flaked Tryjobs</title>
+  <meta name="viewport" content="width=device-width, minimum-scale=1.0, initial-scale=1.0, user-scalable=yes">
+  <script src="components/platform/platform.js"></script>
+  <script src="scripts/repositories.js"></script>
+  <script src="scripts/third_party/js_humanized_time_span/humanized_time_span.js"></script>
+  <style>
+  html,body {
+    height: 100%;
+    margin: 0;
+    background-color: #E5E5E5;
+    font-family: 'RobotoDraft', sans-serif;
+  }
+  </style>
+  <link rel="import" href="components/polymer/polymer.html">
+  <script src="ui/filters.js"></script>
+  <link rel="import" href="components/core-ajax/core-ajax.html">
+  <link rel="import" href="components/font-roboto/roboto.html">
+  <link rel="import" href="components/paper-tabs/paper-tabs.html">
+  <link rel="import" href="components/sortable-table/sortable-table.html">
+  <link rel="import" href="ui/nb-changelogs.html">
+  <link rel="import" href="ui/nb-alert-list.html">
+  <link rel="import" href="ui/nb-grouped-alert-list.html">
+  <link rel="shortcut icon" href="/favicon.ico">
+</head>
+
+<body unresolved touch-action="auto">
+
+
+<polymer-element name="nb-flake-list" attributes='flakes'>
+  <template>
+    <sortable-table id='table' data="{{ flakes }}" rowTemplate="rowTemplate" style='width: 100%'>
+      <template id="rowTemplate">
+        <style>
+          .fail_link { background-color: #FCC;}
+        </style>
+        <td>{{record.row.master_url | master_name }}</td>
+        <td style='max-width: 150px; overflow: hidden'>
+          <a href='{{ record.row | builder_url }}'>{{record.row.builder_name}}</a>
+        </td>
+        <td style='max-width: 300px; overflow: hidden; word-wrap: break-word;'>
+          <a href='{{ record.row | stdio_url(record.row.build_number) }}'>{{record.row.step_name}}</a>
+          <br>
+          <template if="{{ record.row.reason }}">
+            <a href="{{ record.row.reason | flakiness_dashboard_url(record.row.step_name, record.row.master_url) }}">
+              {{record.row.reason }}
+            </a>
+          </template>
+        </td>
+        <td>
+          <a class='fail_link' href="{{ record.row | build_url(record.row.build_number) }}">F</a>
+        </td>
+        <td>{{ record.row.end_time | since_string }}</td>
+      </template>
+    </sortable-table>
+  </template>
+  <script>
+  Polymer('nb-flake-list', {
+    ready: function() {
+      this.$.table.columns = [
+        { title: 'master', name: 'master_url' },
+        { title: 'builder', name: 'builder_name' },
+        { title: 'reason', name: 'reason' },
+        { title: 'failure', name: 'build_number' }, // bad sort criteria.
+        { title: 'since', name: 'last_result_time' },
+      ];
+    }
+  });
+  </script>
+</polymer-element>
+
+<polymer-element name="nb-main" attributes='flakes'>
+<template>
+<h1>Tryjob Flakes</h1>
+<style>
+  paper-tabs {
+    background-color: #00bcd4;
+    color: #fff;
+    box-shadow: 0px 3px 2px rgba(0, 0, 0, 0.2);
+  }
+</style>
+<nb-flake-list flakes='{{ flakes }}'></nb-flake-list>
+<core-ajax url="/flake_data" id='loader' auto handleAs="json" response="{{ flakes }}"></core-ajax>
+</template>
+<script>
+Polymer('nb-main', {
+  ready: function() {
+    console.log('nb-main ready');
+    window.setInterval(30 * 1000, function() {
+      console.log('refreshing');
+      this.$.loader.go();
+    });
+  },
+});
+</script>
+</polymer-element>
+<nb-main></nb-main>
+</body>
+</html>
