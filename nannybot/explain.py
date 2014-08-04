@@ -50,7 +50,10 @@ def main(args):
 
   alerts = []
   for job in jobs:
-    build = buildbot.fetch_build_json(cache, **job)
+    master_url = job['master_url']
+    builder_name = job['builder_name']
+    build_number = job['build_number']
+    build = buildbot.fetch_build_json(cache, master_url, builder_name, build_number)
     if not build:
       continue
 
@@ -65,18 +68,31 @@ def main(args):
     patchset_id = buildbot.property_from_build(build, 'patchset')
     slave_name = buildbot.property_from_build(build, 'slavename')
 
+    alert_template = {
+      'master_url': job['master_url'],
+      'builder_name': job['builder_name'],
+      'build_number': job['build_number'],
+      'slave_name': slave_name,
+      'issue_id': issue_id,
+      'patchset_id': patchset_id,
+      'start_time': int(build['times'][0]),
+      'end_time': int(build['times'][1]),
+    }
+
     for step in failing:
-      alerts.append({
-        'master_url': job['master_url'],
-        'builder_name': job['builder_name'],
-        'build_number': job['build_number'],
-        'slave_name': slave_name,
-        'step_name': step['name'],
-        'issue_id': issue_id,
-        'patchset_id': patchset_id,
-        'start_time': int(build['times'][0]),
-        'end_time': int(build['times'][1]),
-      })
+      reasons = alert_builder.reasons_for_failure(step, build, builder_name, master_url)
+      # Hack to make alert creation simpler:
+      if not reasons:
+        reasons = [None]
+
+      for reason in reasons:
+        alert = alert_template.copy()
+        alert.update({
+          'step_name': step['name'],
+          'reason': reason,
+        })
+        alerts.append(alert)
+
   print json.dumps(alerts, indent=1)
 
 # Currently we're feeding this script with "flaky" try job urls
