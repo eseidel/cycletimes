@@ -58,17 +58,19 @@ def main(args):
 
     if not failing:
       first_step = build['steps'][0]['results'] if build['steps'] else None
-      print '%s NO FAILING STEPS? (first result: %s)' % (job, first_step)
+      logging.error('%s NO FAILING STEPS? (first result: %s)' % (job, first_step))
       continue
 
     issue_id = buildbot.property_from_build(build, 'issue')
     patchset_id = buildbot.property_from_build(build, 'patchset')
+    slave_name = buildbot.property_from_build(build, 'slavename')
 
     for step in failing:
       alerts.append({
         'master_url': job['master_url'],
         'builder_name': job['builder_name'],
         'build_number': job['build_number'],
+        'slave_name': slave_name,
         'step_name': step['name'],
         'issue_id': issue_id,
         'patchset_id': patchset_id,

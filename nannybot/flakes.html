@@ -33,24 +33,32 @@
   <template>
     <sortable-table id='table' data="{{ flakes }}" rowTemplate="rowTemplate" style='width: 100%'>
       <template id="rowTemplate">
-        <style>
-          .fail_link { background-color: #FCC;}
-        </style>
-        <td>{{record.row.master_url | master_name }}</td>
+        <td>
+          {{ record.row.master_url | master_name }}
+        </td>
         <td style='max-width: 150px; overflow: hidden'>
-          <a href='{{ record.row | builder_url }}'>{{record.row.builder_name}}</a>
+          <a href='{{ record.row | builder_url }}'>
+            {{ record.row.builder_name }}
+          </a>
+        </td>
+        <td>
+         {{ record.row.slave_name }}
         </td>
         <td style='max-width: 300px; overflow: hidden; word-wrap: break-word;'>
-          <a href='{{ record.row | stdio_url(record.row.build_number) }}'>{{record.row.step_name}}</a>
+          <a href='{{ record.row | stdio_url(record.row.build_number) }}'>
+            {{ record.row.step_name }}
+          </a>
           <br>
           <template if="{{ record.row.reason }}">
             <a href="{{ record.row.reason | flakiness_dashboard_url(record.row.step_name, record.row.master_url) }}">
-              {{record.row.reason }}
+              {{ record.row.reason }}
             </a>
           </template>
         </td>
         <td>
-          <a class='fail_link' href="{{ record.row | build_url(record.row.build_number) }}">F</a>
+          <a class='fail_link' href="{{ record.row | build_url(record.row.build_number) }}">
+            {{ record.row.build_number }}
+          </a>
         </td>
         <td>{{ record.row.end_time | since_string }}</td>
       </template>
@@ -62,10 +70,13 @@
       this.$.table.columns = [
         { title: 'master', name: 'master_url' },
         { title: 'builder', name: 'builder_name' },
+        { title: 'slave', name: 'slave_name' },
         { title: 'reason', name: 'reason' },
-        { title: 'failure', name: 'build_number' }, // bad sort criteria.
-        { title: 'since', name: 'last_result_time' },
+        { title: 'build', name: 'build_number' }, // bad sort criteria.
+        { title: 'since', name: 'end_time' },
       ];
+      this.$.table.sortColumn = 'end_time';
+      this.$.table.sortDescending = true;
     }
   });
   </script>
