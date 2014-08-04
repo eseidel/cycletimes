@@ -34,6 +34,16 @@
     <sortable-table id='table' data="{{ flakes }}" rowTemplate="rowTemplate" style='width: 100%'>
       <template id="rowTemplate">
         <td>
+          <a href='https://codereview.chromium.org/{{ record.row.issue_id }}'>
+          {{ record.row.issue_id }}
+          </a>
+        </td>
+        <td>
+          <a href='https://codereview.chromium.org/{{ record.row.issue_id }}#ps{{ record.row.patchset_id }}'>
+          {{ record.row.patchset_id }}
+          </a>
+        </td>
+        <td>
           {{ record.row.master_url | master_name }}
         </td>
         <td style='max-width: 150px; overflow: hidden'>
@@ -68,6 +78,8 @@
   Polymer('nb-flake-list', {
     ready: function() {
       this.$.table.columns = [
+        { title: 'issue', name: 'issue_id' },
+        { title: 'patch', name: 'patchset_id' },
         { title: 'master', name: 'master_url' },
         { title: 'builder', name: 'builder_name' },
         { title: 'slave', name: 'slave_name' },
