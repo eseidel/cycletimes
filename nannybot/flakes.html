@@ -44,7 +44,9 @@
           </a>
         </td>
         <td>
-          {{ record.row.master_url | master_name }}
+          <a href='{{ record.row.master_url }}'>
+            {{ record.row.master_url | master_name }}
+          </a>
         </td>
         <td style='max-width: 150px; overflow: hidden'>
           <a href='{{ record.row | builder_url }}'>
@@ -52,7 +54,9 @@
           </a>
         </td>
         <td>
-         {{ record.row.slave_name }}
+          <a href='{{ record.row | slave_url }}'>
+            {{ record.row.slave_name }}
+          </a>
         </td>
         <td style='max-width: 300px; overflow: hidden; word-wrap: break-word;'>
           <a href='{{ record.row | stdio_url(record.row.build_number) }}'>
@@ -83,7 +87,7 @@
         { title: 'master', name: 'master_url' },
         { title: 'builder', name: 'builder_name' },
         { title: 'slave', name: 'slave_name' },
-        { title: 'reason', name: 'reason' },
+        { title: 'reason', name: 'step_name' },
         { title: 'build', name: 'build_number' }, // bad sort criteria.
         { title: 'since', name: 'end_time' },
       ];

@@ -18,6 +18,9 @@ PolymerExpressions.prototype.master_name = function(value) {
   }
   return long_name;
 }
+PolymerExpressions.prototype.slave_url = function(failure) {
+  return failure.master_url + '/buildslaves/' + failure.slave_name;
+}
 PolymerExpressions.prototype.builder_url = function(failure) {
   return failure.master_url + '/builders/' + failure.builder_name;
 }
