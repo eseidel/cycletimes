@@ -93,7 +93,17 @@ def main(args):
         })
         alerts.append(alert)
 
-  print json.dumps(alerts, indent=1)
+  counts = collections.Counter()
+  for alert in alerts:
+    key = alert['step_name']
+    if alert['reason']:
+      key += ':' + alert['reason']
+    counts[key] += 1
+
+  print json.dumps({
+    'counts': counts.most_common(),
+    'flakes': alerts,
+    }, indent=1)
 
 # Currently we're feeding this script with "flaky" try job urls
 # which are collected by stats.py
