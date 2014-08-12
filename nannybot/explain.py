@@ -10,6 +10,8 @@ import requests_cache
 import collections
 import logging
 import json
+import datetime
+import calendar
 
 requests_cache.install_cache('explain')
 
@@ -101,6 +103,7 @@ def main(args):
     counts[key] += 1
 
   print json.dumps({
+    'date': calendar.timegm(datetime.datetime.now().timetuple()),
     'counts': counts.most_common(),
     'flakes': alerts,
     }, indent=1)
